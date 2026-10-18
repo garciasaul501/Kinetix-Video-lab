@@ -1,0 +1,6 @@
+{
+  "name": "Kinetix — Video AI Lab",
+  "description": "Estudio de producción de video con IA para generación de guiones de 2 minutos, narración de voz multiaudio y síntesis de secuencias visuales cinematográficas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

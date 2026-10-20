@@ -44,6 +44,7 @@ import {
   NicheScenePhoto,
   matchBestScenesForBookPages,
 } from '../utils/nicheSceneLibrary';
+import { NicheSceneGalleryView } from './NicheSceneGalleryView';
 
 interface VideoBookPlayerProps {
   videoBook: VideoBook;
@@ -74,6 +75,9 @@ interface VideoBookPlayerProps {
   onSelectAvatar: (avatar: NarratorAvatarPreset) => void;
   customAvatarUrl?: string;
   onUploadCustomAvatar: (dataUrl: string) => void;
+  onSellWithPayPal?: () => void;
+  onAddUnlimitedChapter?: () => void;
+  onUpdateChapterDuration?: (pageIdx: number, newDurationSec: number) => void;
 }
 
 export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
@@ -105,11 +109,15 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   onSelectAvatar,
   customAvatarUrl,
   onUploadCustomAvatar,
+  onSellWithPayPal,
+  onAddUnlimitedChapter,
+  onUpdateChapterDuration,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [readingFontSize, setReadingFontSize] = useState<'normal' | 'large' | 'xlarge'>('large');
 
   // 30 Realistic AI Avatars Gallery State
   const [showAvatarGallery, setShowAvatarGallery] = useState<boolean>(true);
@@ -125,7 +133,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   const [showSceneLibrary, setShowSceneLibrary] = useState<boolean>(true);
   const [selectedSceneNiche, setSelectedSceneNiche] = useState<'Todos' | SceneNicheCategory>('Todos');
   const [sceneSearchQuery, setSceneSearchQuery] = useState<string>('');
-  const [visibleSceneCount, setVisibleSceneCount] = useState<number>(24);
+  const [visibleSceneCount, setVisibleSceneCount] = useState<number>(60);
   const [generatingScenePhotoId, setGeneratingScenePhotoId] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -810,234 +818,18 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
       </div>
 
       {/* =====================================================================
-          1,200+ NICHE SCENE PHOTOS LIBRARY (12 NICHES x 100 PHOTOS = 1,200)
+          1,200+ NICHE SCENE PHOTOS LIBRARY (12 NICHOS × 100 FOTOS = 1,200 HD)
          ===================================================================== */}
-      <div className="bg-[#11131A] border border-slate-800/90 rounded-md p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-md bg-sky-500/15 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/40 text-[10px] font-mono uppercase tracking-wider text-sky-300 font-semibold">
-                  BIBLIOTECA DE +1,200 FOTOS DE ESCENAS POR NICHOS (12 NICHOS · 16:9 HD)
-                </span>
-                <span className="text-[11px] font-mono text-amber-400">
-                  ● Asignando a: Capítulo {currentPage.pageNumber} ({currentPage.chapterTitle})
-                </span>
-              </div>
-              <h3 className="font-display text-base sm:text-lg font-bold text-white mt-0.5">
-                {NICHE_SCENE_LIBRARY_1200.length.toLocaleString()} Fotos Cinematográficas Listas para Escenas de Audiolibros
-              </h3>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleAutoFillBookFrom1200Library()}
-              className="px-3.5 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>
-                {selectedSceneNiche === 'Todos'
-                  ? 'Auto-Asignar Escenas del Tema (de las 1,200 Fotos)'
-                  : `Rellenar los ${pages.length} Capítulos con "${selectedSceneNiche}"`}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowSceneLibrary((prev) => !prev)}
-              className="px-3.5 py-2 rounded bg-[#181C26] hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
-            >
-              <ImageIcon className="w-3.5 h-3.5 text-sky-400" />
-              <span>
-                {showSceneLibrary
-                  ? 'Ocultar +1,200 Fotos'
-                  : 'Explorar +1,200 Fotos por Nicho'}
-              </span>
-              {showSceneLibrary ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {showSceneLibrary && (
-          <div className="pt-4 border-t border-slate-800/90 space-y-4">
-            {/* 12 Niche Filter Buttons + Search across 1,200 Photos */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedSceneNiche('Todos');
-                    setVisibleSceneCount(24);
-                  }}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                    selectedSceneNiche === 'Todos'
-                      ? 'bg-sky-500 text-slate-950 font-semibold'
-                      : 'bg-[#161923] text-slate-300 hover:text-white border border-slate-800'
-                  }`}
-                >
-                  Todos los Nichos (1,200)
-                </button>
-                {SCENE_NICHE_CATEGORIES.map((niche) => (
-                  <button
-                    key={niche}
-                    type="button"
-                    onClick={() => {
-                      setSelectedSceneNiche(niche);
-                      setVisibleSceneCount(24);
-                    }}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                      selectedSceneNiche === niche
-                        ? 'bg-sky-500 text-slate-950 font-semibold'
-                        : 'bg-[#161923] text-slate-300 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    {niche} (100)
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono text-slate-400">
-                  Mostrando {visibleScenes.length} de {filteredNicheScenes.length} fotos
-                </span>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={sceneSearchQuery}
-                    onChange={(e) => {
-                      setSceneSearchQuery(e.target.value);
-                      setVisibleSceneCount(24);
-                    }}
-                    placeholder="Buscar entre 1,200 fotos (ej. finanzas, cerebro, bosque...)"
-                    className="pl-8 pr-3 py-1.5 rounded bg-[#141720] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-sky-500 w-64"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Grid of 1,200 Niche Scene Photos */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {visibleScenes.map((photo) => {
-                const isUsedInCurrentChapter = currentImage === photo.imageUrl;
-                const isGeneratingThisPhoto = generatingScenePhotoId === photo.id;
-
-                return (
-                  <div
-                    key={photo.id}
-                    onClick={() => handleSelectScenePhotoForActiveChapter(photo)}
-                    className={`group rounded-md border p-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                      isUsedInCurrentChapter
-                        ? 'bg-[#162032] border-sky-400 shadow-lg ring-1 ring-sky-400/40'
-                        : 'bg-[#0D1017] border-slate-800/90 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="space-y-1.5">
-                      <div
-                        className="relative h-24 w-full rounded overflow-hidden bg-slate-900 border border-slate-800"
-                        style={{
-                          background: `linear-gradient(135deg, ${photo.primaryHex} 0%, ${photo.secondaryHex} 100%)`,
-                        }}
-                      >
-                        <img
-                          src={photo.imageUrl}
-                          alt={photo.title}
-                          loading="lazy"
-                          referrerPolicy="no-referrer"
-                          onError={(e) => {
-                            const target = e.currentTarget;
-                            if (target.src !== photo.fallbackUrl) {
-                              target.src = photo.fallbackUrl;
-                            }
-                          }}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent" />
-                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-950/85 border border-slate-700 text-[9px] font-mono font-bold text-sky-400">
-                          #{String(photo.number).padStart(4, '0')}
-                        </span>
-                        {isUsedInCurrentChapter && (
-                          <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-emerald-500 text-slate-950 text-[9px] font-mono font-bold flex items-center gap-0.5">
-                            <Check className="w-2.5 h-2.5" /> Cap. {currentPage.pageNumber}
-                          </span>
-                        )}
-                        <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between">
-                          <span className="text-[9px] font-mono text-amber-300 truncate">
-                            {photo.subNiche}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-[11px] font-semibold text-slate-100 line-clamp-1">
-                          {photo.title}
-                        </div>
-                        <div className="text-[9px] font-mono text-slate-400 truncate">
-                          {photo.niche}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectScenePhotoForActiveChapter(photo);
-                        }}
-                        className="flex-1 py-1 px-1.5 rounded bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-[10px] font-mono text-sky-300 flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                      >
-                        <span>Usar Cap. {currentPage.pageNumber}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleGenerateAiVariantForNichePhoto(photo);
-                        }}
-                        disabled={isGeneratingThisPhoto}
-                        className="py-1 px-1.5 rounded bg-[#151924] hover:bg-slate-800 border border-slate-800 text-[10px] font-mono text-amber-300 flex items-center justify-center transition-colors cursor-pointer"
-                        title="Generar variante única con Gemini 3.1 IA"
-                      >
-                        {isGeneratingThisPhoto ? (
-                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                        ) : (
-                          <Sparkles className="w-2.5 h-2.5" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Load More Button to browse all 1,200 Niche Photos smoothly */}
-            {visibleSceneCount < filteredNicheScenes.length && (
-              <div className="flex items-center justify-center pt-1">
-                <button
-                  type="button"
-                  onClick={() => setVisibleSceneCount((prev) => prev + 48)}
-                  className="px-4 py-1.5 rounded bg-[#161A24] hover:bg-slate-800 border border-slate-700 text-xs font-mono text-sky-300 flex items-center gap-2 cursor-pointer transition-colors"
-                >
-                  <span>
-                    Cargar más escenas ({visibleSceneCount} de {filteredNicheScenes.length} fotos disponibles)
-                  </span>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <NicheSceneGalleryView
+        activeChapterNumber={currentPage.pageNumber}
+        activeChapterTitle={currentPage.chapterTitle}
+        currentChapterImageUrl={currentImage}
+        totalChapters={pages.length}
+        onSelectPhotoForChapter={handleSelectScenePhotoForActiveChapter}
+        onAutoFillAllChaptersWithNiche={handleAutoFillBookFrom1200Library}
+        onGenerateAiVariantForPhoto={handleGenerateAiVariantForNichePhoto}
+        generatingPhotoId={generatingScenePhotoId}
+      />
 
       {/* Top Studio Control Bar: Visual Mode Selector + 1-Click Actions */}
       <div className="bg-[#11131A] border border-slate-800/90 rounded-md p-4 space-y-4">
@@ -1066,22 +858,22 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             </div>
           </div>
 
-          {/* 1-Click Audiobook Generation & MP4 Export Buttons */}
+          {/* 1-Click Audiobook Generation, MP4 Export & PayPal Monetization Buttons */}
           <div className="flex flex-wrap items-center gap-2.5">
             <button
               type="button"
               onClick={onGenerateAllPageImages}
               disabled={isGeneratingAllPages || generatingPageIdx !== null}
-              className="px-3.5 py-2 rounded bg-[#181B24] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2.5 rounded-lg bg-[#0070BA] hover:bg-[#005EA6] text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
             >
               {isGeneratingAllPages ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
                   <span>Creando Escenas con IA...</span>
                 </>
               ) : (
                 <>
-                  <ImageIcon className="w-3.5 h-3.5 text-amber-400" />
+                  <ImageIcon className="w-3.5 h-3.5 text-white" />
                   <span>1. Generar Escenas IA Nuevas</span>
                 </>
               )}
@@ -1091,16 +883,16 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               type="button"
               onClick={onGenerateBookAudio}
               disabled={isGeneratingAudio}
-              className="px-3.5 py-2 rounded bg-[#181B24] hover:bg-slate-800 border border-slate-700 text-slate-200 font-medium text-xs flex items-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
             >
               {isGeneratingAudio ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
                   <span>Grabando Voz del Audiolibro...</span>
                 </>
               ) : (
                 <>
-                  <Mic className="w-3.5 h-3.5 text-sky-400" />
+                  <Mic className="w-3.5 h-3.5 text-white" />
                   <span>
                     {activeTake
                       ? 'Regenerar Voz IA Completa'
@@ -1114,7 +906,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               type="button"
               onClick={onExportMp4}
               disabled={isExportingMp4}
-              className="px-4 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-2 transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
             >
               {isExportingMp4 ? (
                 <>
@@ -1124,10 +916,20 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               ) : (
                 <>
                   <Film className="w-3.5 h-3.5" />
-                  <span>3. Descargar Audiolibro en Video (.MP4)</span>
+                  <span>3. Descargar Audiolibro (.MP4)</span>
                 </>
               )}
             </button>
+
+            {onSellWithPayPal && (
+              <button
+                type="button"
+                onClick={onSellWithPayPal}
+                className="px-4 py-2.5 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-extrabold text-xs flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all cursor-pointer"
+              >
+                <span>Suscríbete ahora</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1322,47 +1124,93 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             </div>
           </div>
 
-          {/* Right Page: Spoken Audiobook Text with Live Sentence Highlighting */}
-          <div className="lg:col-span-6 bg-[#11141D] p-6 sm:p-8 lg:p-10 flex flex-col justify-between relative">
+          {/* Right Page: Spoken Audiobook Text with High-Contrast Reading & Font Size Switcher */}
+          <div className="lg:col-span-6 bg-white p-6 sm:p-8 lg:p-10 flex flex-col justify-between relative">
             <div className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3 text-[11px] font-mono text-slate-400">
-                <span className="truncate max-w-[260px] uppercase tracking-wider">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 text-xs font-mono text-slate-700">
+                <span className="font-bold uppercase tracking-wider text-slate-900">
                   {videoBook.bookTitle}
                 </span>
-                <span className="text-amber-400 font-semibold">
-                  Cap. {currentPage.pageNumber} / {pages.length}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-600 font-sans font-semibold">Tamaño de letra:</span>
+                  {(['normal', 'large', 'xlarge'] as const).map((sz) => (
+                    <button
+                      key={sz}
+                      type="button"
+                      onClick={() => setReadingFontSize(sz)}
+                      className={`px-2 py-0.5 rounded font-sans font-bold text-xs border cursor-pointer ${
+                        readingFontSize === sz
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
+                      }`}
+                    >
+                      {sz === 'normal' ? 'A' : sz === 'large' ? 'A+ Grande' : 'A++ Muy Grande'}
+                    </button>
+                  ))}
+                  <span className="text-indigo-700 font-bold ml-1">
+                    Cap. {currentPage.pageNumber} / {pages.length}
+                  </span>
+                </div>
               </div>
 
-              <div className="space-y-1.5 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono uppercase tracking-widest text-amber-400">
-                    CAPÍTULO {currentPage.pageNumber} · AVATAR #{selectedAvatar.number}{' '}
+              <div className="space-y-2 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-mono font-bold uppercase tracking-widest text-indigo-700">
+                    CAPÍTULO {currentPage.pageNumber} · NARRADOR: #{selectedAvatar.number}{' '}
                     {selectedAvatar.name.toUpperCase()}
                   </span>
-                  {isPlaying && (
-                    <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      NARRADOR HABLANDO EN VIVO
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {onUpdateChapterDuration && (
+                      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-300">
+                        <span>Duración Cap. (Sin límite):</span>
+                        <input
+                          type="number"
+                          min={5}
+                          max={3600}
+                          value={currentPage.durationSec || 10}
+                          onChange={(e) =>
+                            onUpdateChapterDuration(
+                              activePageIdx,
+                              Math.max(5, Number(e.target.value) || 10)
+                            )
+                          }
+                          className="w-16 px-1.5 py-0.5 rounded bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900"
+                        />
+                        <span>seg</span>
+                      </label>
+                    )}
+                    {isPlaying && (
+                      <span className="text-xs font-mono font-bold text-emerald-700 flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+                        HABLANDO EN VIVO
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <h3 className="font-display text-2xl sm:text-3xl font-bold text-slate-100 leading-tight">
+                <h3 className="font-display text-2xl sm:text-3xl font-extrabold text-slate-950 leading-tight">
                   {currentPage.chapterTitle}
                 </h3>
               </div>
 
-              {/* Synchronized Paragraph Text (highlights active spoken sentence) */}
-              <div className="pt-3 space-y-2 leading-relaxed text-base sm:text-lg text-slate-200 font-normal">
+              {/* Synchronized Paragraph Text (High-Contrast Easy Reading) */}
+              <div
+                className={`pt-3 space-y-2 leading-relaxed font-medium text-slate-900 ${
+                  readingFontSize === 'xlarge'
+                    ? 'text-xl sm:text-2xl leading-loose'
+                    : readingFontSize === 'large'
+                    ? 'text-lg sm:text-xl leading-relaxed'
+                    : 'text-base sm:text-lg leading-relaxed'
+                }`}
+              >
                 {sentences.map((sentence, sIdx) => {
                   const isSentenceActive = sIdx === activeSentenceIdx;
                   return (
                     <span
                       key={sIdx}
-                      className={`inline transition-colors duration-300 rounded px-1 py-0.5 ${
+                      className={`inline transition-colors duration-300 rounded px-1.5 py-0.5 ${
                         isSentenceActive
-                          ? 'bg-amber-500/20 text-amber-200 font-medium shadow-sm'
-                          : 'text-slate-200'
+                          ? 'bg-amber-200 text-slate-950 font-bold shadow-2xs'
+                          : 'text-slate-900'
                       }`}
                     >
                       {sentence}{' '}
@@ -1542,82 +1390,101 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
         </div>
       </div>
 
-      {/* Chapter Strip of All Scenes & Chapters in the Spoken Audiobook */}
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
-        {pages.map((p, idx) => {
-          const isCurrent = idx === activePageIdx;
-          const img = pageImages[idx];
-          return (
-            <div
-              key={p.pageNumber}
-              onClick={() => jumpToPage(idx)}
-              className={`group rounded-md border p-3 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                isCurrent
-                  ? 'bg-[#171B26] border-amber-500/80 shadow-md'
-                  : 'bg-[#10131B] border-slate-800/80 hover:border-slate-700'
-              }`}
+      {/* Chapter Strip of All Scenes & Chapters in the Spoken Audiobook + Add Unlimited Chapters */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-base font-bold text-slate-950">
+            Capítulos y Escenas del Audiolibro ({pages.length} Capítulos · Duración Total:{' '}
+            {formatSec(pageTimings.totalDuration)} · Sin Límite de Tiempo)
+          </h3>
+          {onAddUnlimitedChapter && (
+            <button
+              type="button"
+              onClick={onAddUnlimitedChapter}
+              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-xs cursor-pointer"
             >
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[10px] font-mono">
-                  <span className={isCurrent ? 'text-amber-400 font-bold' : 'text-slate-400'}>
-                    CAPÍTULO {p.pageNumber}
-                  </span>
-                  <span className="text-slate-500">{p.durationSec}s</span>
-                </div>
+              <Sparkles className="w-4 h-4" />
+              <span>+ Añadir Nuevo Capítulo / Escena (Sin Límite)</span>
+            </button>
+          )}
+        </div>
 
-                {/* Mini Thumbnail Preview */}
-                <div
-                  className="h-20 w-full rounded overflow-hidden border border-slate-800 relative flex items-center justify-center"
-                  style={{
-                    background: `linear-gradient(135deg, ${p.primaryHex} 0%, ${p.secondaryHex} 100%)`,
-                  }}
-                >
-                  {img ? (
-                    <img
-                      src={img}
-                      alt={p.chapterTitle}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span className="text-[10px] font-mono text-slate-400 px-2 text-center">
-                      Escena lista para generar
-                    </span>
-                  )}
-                </div>
-
-                <h4 className="text-xs font-semibold text-slate-100 line-clamp-1 pt-0.5">
-                  {p.chapterTitle}
-                </h4>
-                <p className="text-[11px] text-slate-400 line-clamp-2 leading-snug">
-                  {p.pageText}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onGeneratePageImage(idx);
-                }}
-                disabled={generatingPageIdx === idx || isGeneratingAllPages}
-                className="w-full mt-1 py-1 px-2 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] font-medium text-amber-400 flex items-center justify-center gap-1 transition-colors cursor-pointer"
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+          {pages.map((p, idx) => {
+            const isCurrent = idx === activePageIdx;
+            const img = pageImages[idx];
+            return (
+              <div
+                key={p.pageNumber}
+                onClick={() => jumpToPage(idx)}
+                className={`group rounded-xl border p-3.5 transition-all cursor-pointer flex flex-col justify-between gap-2.5 bg-white ${
+                  isCurrent
+                    ? 'border-indigo-600 ring-2 ring-indigo-600/20 shadow-md'
+                    : 'border-slate-200 hover:border-slate-400 shadow-2xs'
+                }`}
               >
-                {generatingPageIdx === idx ? (
-                  <>
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Creando escena...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-3 h-3" />
-                    <span>{img ? 'Cambiar escena' : 'Generar escena IA'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          );
-        })}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono font-bold">
+                    <span className={isCurrent ? 'text-indigo-700' : 'text-slate-700'}>
+                      CAPÍTULO {p.pageNumber}
+                    </span>
+                    <span className="text-slate-600">{p.durationSec}s</span>
+                  </div>
+
+                  {/* Mini Thumbnail Preview */}
+                  <div
+                    className="h-24 w-full rounded-lg overflow-hidden border border-slate-200 relative flex items-center justify-center"
+                    style={{
+                      background: `linear-gradient(135deg, ${p.primaryHex} 0%, ${p.secondaryHex} 100%)`,
+                    }}
+                  >
+                    {img ? (
+                      <img
+                        src={img}
+                        alt={p.chapterTitle}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-xs font-mono text-white px-2 text-center">
+                        Escena lista para generar
+                      </span>
+                    )}
+                  </div>
+
+                  <h4 className="text-sm font-bold text-slate-950 leading-snug break-words">
+                    {p.chapterTitle}
+                  </h4>
+                  <p className="text-xs text-slate-700 line-clamp-3 leading-relaxed">
+                    {p.pageText}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onGeneratePageImage(idx);
+                  }}
+                  disabled={generatingPageIdx === idx || isGeneratingAllPages}
+                  className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-indigo-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  {generatingPageIdx === idx ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Creando escena...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{img ? 'Cambiar escena IA' : 'Generar escena IA'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

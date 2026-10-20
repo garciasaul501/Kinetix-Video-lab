@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -15,6 +16,78 @@ import { GoogleGenAI, Type, GenerateVideosOperation } from '@google/genai';
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ============================================================================
+// ADMINISTRATOR ACCOUNT & STUDIO AUTHENTICATION STORE
+// ============================================================================
+const MASTER_ADMIN_EMAIL = 'garciasaul501@gmail.com';
+const MASTER_ADMIN_PASS = 'Garciasaul@501';
+const ADMIN_STORE_PATH = path.join(os.tmpdir(), 'kinetix-studio-admin-users.json');
+
+interface StoredStudioUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'editor' | 'subscriber';
+  plan: string;
+  status: 'active' | 'suspended';
+  salt: string;
+  passwordHash: string;
+  createdAt: string;
+}
+
+function hashPasswordWithSalt(password: string, salt: string): string {
+  return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+
+function createSignedToken(email: string, role: string): string {
+  const payload = Buffer.from(
+    JSON.stringify({ email: email.toLowerCase(), role, iat: Date.now() })
+  ).toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', 'kinetix-studio-admin-secret-2026')
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${sig}`;
+}
+
+function loadStudioUsers(): StoredStudioUser[] {
+  const defaultSalt = 'kinetix-master-salt-501';
+  const masterAdmin: StoredStudioUser = {
+    id: 'admin-master-01',
+    email: MASTER_ADMIN_EMAIL,
+    name: 'Saúl García (Administrador Principal)',
+    role: 'admin',
+    plan: 'Enterprise Master · Ilimitado',
+    status: 'active',
+    salt: defaultSalt,
+    passwordHash: hashPasswordWithSalt(MASTER_ADMIN_PASS, defaultSalt),
+    createdAt: '2026-10-20',
+  };
+
+  try {
+    if (fs.existsSync(ADMIN_STORE_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(ADMIN_STORE_PATH, 'utf8'));
+      if (Array.isArray(raw) && raw.length > 0) {
+        const hasMaster = raw.some(
+          (u: StoredStudioUser) => u.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()
+        );
+        return hasMaster ? raw : [masterAdmin, ...raw];
+      }
+    }
+  } catch (_e) {
+    // Fallback to default master admin
+  }
+  return [masterAdmin];
+}
+
+function saveStudioUsers(users: StoredStudioUser[]): void {
+  try {
+    fs.writeFileSync(ADMIN_STORE_PATH, JSON.stringify(users, null, 2), 'utf8');
+  } catch (_e) {
+    // Ignore write errors in read-only environments
+  }
+}
 
 function getActiveApiKey(): string {
   return (process.env.API_KEY || process.env.GEMINI_API_KEY || '').trim();
@@ -634,21 +707,31 @@ async function startServer() {
 
   app.use(express.json({ limit: '50mb' }));
 
-  // 0. Simple 1-Click PDF to Video-eBook (Libro Electrónico en Video)
+  // 0. Simple 1-Click PDF to Video-eBook (Libro Electrónico en Video Sin Límite)
   app.post('/api/pdf-to-videobook', async (req, res) => {
     const {
       textoPdf,
       bookStyle = 'Ilustración Editorial Cinematográfica',
       filename = 'Documento PDF',
+      chaptersCount,
+      unlimitedDuration = true,
     } = req.body || {};
 
     const cleanPdf =
       (textoPdf || '').trim() ||
       'La lectura audiovisual combina la profundidad de los libros con la fuerza de las imágenes y la voz narrada.';
 
+    const wordCountEst = cleanPdf.split(/\s+/).filter(Boolean).length;
+    const requestedChapters =
+      Number(chaptersCount) > 0
+        ? Math.min(20, Math.max(5, Number(chaptersCount)))
+        : wordCountEst > 350
+        ? 8
+        : 6;
+
     const bookSchema = {
       systemInstruction:
-        'Eres un Editor Literario Senior y Director de Libros Electrónicos Interactivos en Video (Video-eBooks). Tu misión es transformar el texto extraído de un PDF en un Libro Electrónico en Video de 5 páginas claras, amenas, fáciles de leer y listas para ser narradas en voz alta con ilustraciones generadas por IA.',
+        'Eres un Editor Literario Senior y Director de Audiolibros en Video Sin Límite de Tiempo (Video-eBooks). Tu misión es transformar el texto extraído de un PDF en un Audiolibro en Video con capítulos claros, completos, fáciles de leer y listos para ser narrados en voz alta sin límite de duración.',
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
@@ -700,7 +783,9 @@ async function startServer() {
       },
     };
 
-    const prompt = `Convierte el siguiente contenido extraído de un documento PDF en un Libro Electrónico en Video (Video-eBook) dividido en exactamente 5 páginas ilustradas y narradas.
+    const prompt = `Convierte el siguiente contenido extraído de un documento PDF en un Audiolibro en Video (Video-eBook) dividido en ${requestedChapters} capítulos ilustrados y narrados (${
+      unlimitedDuration ? 'Sin límite de tiempo, desarrollando cada capítulo con riqueza y claridad' : 'Duración optimizada'
+    }).
 Estilo visual de las ilustraciones: ${bookStyle}.
 Archivo fuente: ${filename}.
 
@@ -709,14 +794,14 @@ Contenido del PDF:
 ${cleanPdf}
 """
 
-Para cada una de las 5 páginas incluye:
-- pageNumber (1 a 5)
-- chapterTitle (título atractivo del capítulo o página en español)
-- pageText (párrafo claro, envolvente y literario de 2 a 4 oraciones pensado para leerse en la página del libro y escucharse en voz alta)
-- keyQuote (frase breve destacada de la página)
-- imagePrompt (prompt detallado en inglés para generar la ilustración de esa página con estilo ${bookStyle})
-- durationSec (segundos estimados de lectura entre 6 y 12)
-- primaryHex, secondaryHex, accentHex (colores hexadecimales elegantes oscuros para la maquetación).`;
+Para cada uno de los ${requestedChapters} capítulos incluye:
+- pageNumber (1 a ${requestedChapters})
+- chapterTitle (título claro y atractivo del capítulo en español)
+- pageText (párrafo completo, claro, envolvente y muy fácil de leer de 3 a 5 oraciones pensado para mostrarse con letra grande en pantalla y escucharse en voz alta)
+- keyQuote (frase breve destacada del capítulo)
+- imagePrompt (prompt detallado en inglés para generar la ilustración de ese capítulo con estilo ${bookStyle})
+- durationSec (segundos estimados de lectura completa de ese capítulo, sin límite artificial)
+- primaryHex, secondaryHex, accentHex (colores hexadecimales elegantes para la escena).`;
 
     try {
       const ai = getGenAIClient();
@@ -1440,7 +1525,7 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       res.send(mp3Buffer);
     } catch (_err: any) {
       try {
-        const dur = Math.min(30, Math.max(4, Number(durationSec) || 10));
+        const dur = Math.max(4, Number(durationSec) || 12);
         await execFileAsync('ffmpeg', [
           '-y',
           '-f',
@@ -1466,9 +1551,14 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
     }
   });
 
-  // 6. Export Real H.264 + AAC MP4 Video File with Images & Audio (via FFmpeg)
+  // 6. Export Real H.264 + AAC MP4 Video File with Images & Audio (No Time Limit)
   app.post('/api/export-mp4', async (req, res) => {
-    const { videoBase64, audioBase64, durationSec = 8 } = req.body || {};
+    const {
+      videoBase64,
+      audioBase64,
+      durationSec = 12,
+      capturePassDurationSec = 12,
+    } = req.body || {};
     if (!videoBase64 || typeof videoBase64 !== 'string') {
       res.status(400).json({ error: 'Se requieren los datos de video para exportar a MP4.' });
       return;
@@ -1496,9 +1586,19 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
         hasCustomAudio = true;
       }
 
+      const targetDur = Math.max(6, Number(durationSec) || 12);
+      const passDur = Math.max(4, Number(capturePassDurationSec) || 12);
+      const ptsRatio = Math.max(1, Number((targetDur / passDur).toFixed(3)));
+      const vfFilter =
+        ptsRatio > 1.05
+          ? `setpts=${ptsRatio}*PTS,scale=trunc(iw/2)*2:trunc(ih/2)*2`
+          : 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
+
       if (hasCustomAudio) {
         await execFileAsync('ffmpeg', [
           '-y',
+          '-stream_loop',
+          '-1',
           '-i',
           inputVideoPath,
           '-i',
@@ -1525,7 +1625,6 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
           outputMp4Path,
         ]);
       } else {
-        const dur = Math.min(30, Math.max(4, Number(durationSec) || 8));
         await execFileAsync('ffmpeg', [
           '-y',
           '-i',
@@ -1533,15 +1632,17 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
           '-f',
           'lavfi',
           '-i',
-          `sine=frequency=196:duration=${dur}`,
+          `sine=frequency=196:duration=${targetDur}`,
           '-map',
           '0:v:0',
           '-map',
           '1:a:0',
           '-vf',
-          'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+          vfFilter,
           '-af',
-          'volume=0.2,afade=t=in:st=0:d=0.8,afade=t=out:st=' + Math.max(1, dur - 1.2) + ':d=1.2',
+          'volume=0.2,afade=t=in:st=0:d=0.8,afade=t=out:st=' +
+            Math.max(1, targetDur - 1.2) +
+            ':d=1.2',
           '-c:v',
           'libx264',
           '-preset',
@@ -1688,6 +1789,101 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       res.status(500).json({
         error: 'Error al descargar el video.',
       });
+    }
+  });
+
+  // 10. Administrator & Studio Authentication Endpoints
+  app.post('/api/auth/login', (req, res) => {
+    try {
+      const { email, password } = req.body || {};
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const rawPass = String(password || '');
+
+      const users = loadStudioUsers();
+      const matched = users.find((u) => u.email.toLowerCase() === cleanEmail);
+
+      if (!matched) {
+        res.status(401).json({
+          error: 'No existe una cuenta con ese correo electrónico.',
+        });
+        return;
+      }
+
+      const computedHash = hashPasswordWithSalt(rawPass, matched.salt);
+      const isMasterMatch =
+        cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() && rawPass === MASTER_ADMIN_PASS;
+
+      if (computedHash !== matched.passwordHash && !isMasterMatch) {
+        res.status(401).json({
+          error: 'Contraseña incorrecta. Verifica tus credenciales.',
+        });
+        return;
+      }
+
+      const token = createSignedToken(matched.email, matched.role);
+      const publicUsers = users.map(({ salt: _s, passwordHash: _p, ...rest }) => rest);
+      const { salt: _s, passwordHash: _p, ...publicProfile } = matched;
+
+      res.json({
+        session: {
+          token,
+          user: publicProfile,
+          loggedInAt: new Date().toISOString(),
+        },
+        users: publicUsers,
+      });
+    } catch (_err: any) {
+      res.status(500).json({ error: 'Error interno al verificar la cuenta de administrador.' });
+    }
+  });
+
+  app.get('/api/auth/me', (_req, res) => {
+    const users = loadStudioUsers();
+    const master = users[0];
+    const { salt: _s, passwordHash: _p, ...publicProfile } = master;
+    res.json({
+      user: publicProfile,
+      users: users.map(({ salt: _s2, passwordHash: _p2, ...rest }) => rest),
+    });
+  });
+
+  app.post('/api/admin/users', (req, res) => {
+    try {
+      const { email, name, password, role } = req.body || {};
+      const cleanEmail = String(email || '').trim().toLowerCase();
+      const rawPass = String(password || '').trim();
+      if (!cleanEmail || !rawPass) {
+        res.status(400).json({ error: 'Email y contraseña requeridos.' });
+        return;
+      }
+
+      const users = loadStudioUsers();
+      const existingIdx = users.findIndex((u) => u.email.toLowerCase() === cleanEmail);
+      const salt = crypto.randomBytes(12).toString('hex');
+      const newEntry: StoredStudioUser = {
+        id: existingIdx >= 0 ? users[existingIdx].id : `usr-${Date.now()}`,
+        email: cleanEmail,
+        name: String(name || cleanEmail.split('@')[0]).trim(),
+        role: role === 'admin' || role === 'editor' ? role : 'subscriber',
+        plan: role === 'admin' ? 'Enterprise Master · Ilimitado' : 'Pro Studio',
+        status: 'active',
+        salt,
+        passwordHash: hashPasswordWithSalt(rawPass, salt),
+        createdAt: new Date().toISOString().slice(0, 10),
+      };
+
+      if (existingIdx >= 0) {
+        users[existingIdx] = newEntry;
+      } else {
+        users.push(newEntry);
+      }
+      saveStudioUsers(users);
+
+      res.json({
+        users: users.map(({ salt: _s, passwordHash: _p, ...rest }) => rest),
+      });
+    } catch (_err) {
+      res.status(500).json({ error: 'No se pudo guardar el usuario.' });
     }
   });
 

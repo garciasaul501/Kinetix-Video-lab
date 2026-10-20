@@ -22,6 +22,7 @@ export interface NicheScenePhoto {
   keywords: string[];
   imageUrl: string;
   fallbackUrl: string;
+  svgBackupUrl: string;
   primaryHex: string;
   secondaryHex: string;
   accentHex: string;
@@ -57,7 +58,7 @@ interface NicheBlueprint {
 const CINEMATIC_LIGHTING_MODES = [
   { label: 'Luz Ámbar Cinematográfica 35mm', en: 'warm amber volumetric 35mm anamorphic lighting' },
   { label: 'Hora Dorada al Amanecer', en: 'golden hour sunrise rays and atmospheric mist' },
-  { label: 'Estudio Oscuro de Alto Contraste', en: 'high-contrast chiaroscuro dark cinema lighting' },
+  { label: 'Estudio Editorial de Alto Contraste', en: 'high-contrast chiaroscuro cinema lighting' },
   { label: 'Neón Cian y Azul Profundo', en: 'deep slate blue and cyan rim lighting' },
   { label: 'Luz Natural Editorial 85mm', en: 'soft editorial natural window light 85mm f/1.4' },
 ];
@@ -80,6 +81,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1579532537598-459ecdaf39cc',
       'photo-1542744173-8e7e53415bb0',
       'photo-1611974789855-9c2a0a7236a3',
+      'photo-1444653614773-995cb1ef9efa',
+      'photo-1559526324-4b87b5e36e44',
     ],
     subNiches: [
       'Mercados Bursátiles & Trading',
@@ -112,6 +115,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1635070041078-e363dbe005cb',
       'photo-1504384308090-c894fdcc538d',
       'photo-1581091226825-a6a2a5aee158',
+      'photo-1517433456452-f9633a875f6f',
+      'photo-1535378917042-10a22c95931a',
     ],
     subNiches: [
       'Redes Neuronales & Deep Learning',
@@ -144,6 +149,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1614728894747-a83421e2b9c9',
       'photo-1516339901601-2e1b62dc0c45',
       'photo-1530026405186-ed1f139313f8',
+      'photo-1444703686981-a3abbc4d4fe3',
+      'photo-1509198397868-475647b2a1e5',
     ],
     subNiches: [
       'Neurociencia & Sinapsis Cerebral',
@@ -176,6 +183,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1564507592333-c60657eea523',
       'photo-1533929736458-ca588d08c8be',
       'photo-1577985051167-0d49eec21977',
+      'photo-1541963463532-d68292c34b19',
+      'photo-1481627834876-b7833e8f5570',
     ],
     subNiches: [
       'Bibliotecas Históricas & Manuscritos',
@@ -208,6 +217,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1508672019048-805c876b67e2',
       'photo-1528715471579-d1bcf0ba5e83',
       'photo-1469474968028-56623f02e42e',
+      'photo-1506744038136-46273834b3fb',
+      'photo-1490730141103-6cac27aaab94',
     ],
     subNiches: [
       'Mindfulness & Atención Plena',
@@ -240,6 +251,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1514539079130-25950c84af65',
       'photo-1534447677768-be436bb09401',
       'photo-1481627834876-b7833e8f5570',
+      'photo-1509021436665-8f07dbf5bf1d',
+      'photo-1476275466078-4007374efbbe',
     ],
     subNiches: [
       'Noir, Detectives & Suspenso',
@@ -272,6 +285,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1426604966848-d7adac402bff',
       'photo-1493246507139-91e8fad9978e',
       'photo-1506744038136-46273834b3fb',
+      'photo-1507525428034-b723cf961d3e',
+      'photo-1470071459604-3b5ec3a7fe05',
     ],
     subNiches: [
       'Selvas Tropicales & Biodiversidad',
@@ -304,6 +319,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1571019613454-1cb2f99b2d8b',
       'photo-1506126613408-eca07ce68773',
       'photo-1559757175-5700dde675bc',
+      'photo-1518611012118-696072aa579a',
+      'photo-1538805060514-97d9cc17730c',
     ],
     subNiches: [
       'Longevidad Celular & Biohacking',
@@ -336,6 +353,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1574717024653-61fd2cf4d44d',
       'photo-1552664730-d307ca884978',
       'photo-1611162617474-5b21e879e113',
+      'photo-1598550476439-6847785fcea6',
+      'photo-1511671782779-c97d3d27a1d4',
     ],
     subNiches: [
       'Estudios de Podcast & Locución',
@@ -368,6 +387,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1509021436665-8f07dbf5bf1d',
       'photo-1476275466078-4007374efbbe',
       'photo-1532012197267-da84d127e765',
+      'photo-1541963463532-d68292c34b19',
+      'photo-1524995997946-a1c2e315a42f',
     ],
     subNiches: [
       'Estoicismo Clásico & Marco Aurelio',
@@ -400,6 +421,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1506973035872-a4ec16b8e8d9',
       'photo-1518684079-3c830dcef090',
       'photo-1496442226666-8d4d0e62e6e9',
+      'photo-1508057198894-247b23fe5ade',
+      'photo-1519501025264-65ba15a82390',
     ],
     subNiches: [
       'Metrópolis Nocturnas & Skylines',
@@ -432,6 +455,8 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
       'photo-1522202176988-66273c2fd55f',
       'photo-1516979187457-637abb4f9353',
       'photo-1495446815901-a7297e633e8d',
+      'photo-1507842229356-51c61504d3ab',
+      'photo-1457369804613-52c61a468e7d',
     ],
     subNiches: [
       'Lectura Profunda & Aprendizaje',
@@ -450,6 +475,46 @@ const NICHE_BLUEPRINTS: NicheBlueprint[] = [
 ];
 
 /**
+ * Builds an instant, zero-fail high-definition SVG scene illustration data URI
+ * as a secondary backup so no photo ever renders broken even offline.
+ */
+function buildSvgSceneBackup(
+  num: number,
+  niche: string,
+  subNiche: string,
+  title: string,
+  primaryHex: string,
+  secondaryHex: string,
+  accentHex: string
+): string {
+  const safeNiche = niche.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const safeSub = subNiche.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const safeTitle = title.slice(0, 62).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720">
+    <defs>
+      <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${primaryHex}"/>
+        <stop offset="60%" stop-color="${secondaryHex}"/>
+        <stop offset="100%" stop-color="#090D16"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="50%" cy="45%" r="50%">
+        <stop offset="0%" stop-color="${accentHex}" stop-opacity="0.42"/>
+        <stop offset="100%" stop-color="${primaryHex}" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1280" height="720" fill="url(#bg)"/>
+    <rect width="1280" height="720" fill="url(#glow)"/>
+    <circle cx="640" cy="320" r="190" fill="none" stroke="${accentHex}" stroke-opacity="0.35" stroke-width="2"/>
+    <circle cx="640" cy="320" r="120" fill="none" stroke="#FFFFFF" stroke-opacity="0.2" stroke-width="1.5"/>
+    <line x1="120" y1="520" x2="1160" y2="520" stroke="${accentHex}" stroke-opacity="0.45" stroke-width="2"/>
+    <text x="90" y="95" fill="${accentHex}" font-family="monospace" font-size="22" font-weight="bold">ESCENA #${String(num).padStart(4, '0')} · ${safeNiche.toUpperCase()}</text>
+    <text x="90" y="585" fill="#FFFFFF" font-family="sans-serif" font-size="34" font-weight="bold">${safeSub}</text>
+    <text x="90" y="635" fill="#E2E8F0" font-family="sans-serif" font-size="24">${safeTitle}</text>
+  </svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/**
  * Generates the complete catalog of 1,200 Niche Scene Photos (100 scenes per each of the 12 niches).
  */
 function build1200NicheSceneCatalog(): NicheScenePhoto[] {
@@ -457,7 +522,7 @@ function build1200NicheSceneCatalog(): NicheScenePhoto[] {
   let globalNumber = 1;
 
   for (const bp of NICHE_BLUEPRINTS) {
-    // 5 subNiches x 4 settings x 5 lighting modes = 100 unique scenes per niche (12 x 100 = 1,200 total!)
+    // 5 subNiches x 4 settings x 5 lighting modes = 100 unique scenes per niche (12 x 100 = 1,200 total)
     for (let sIdx = 0; sIdx < bp.subNiches.length; sIdx++) {
       const subNiche = bp.subNiches[sIdx];
       for (let setIdx = 0; setIdx < bp.settings.length; setIdx++) {
@@ -466,17 +531,25 @@ function build1200NicheSceneCatalog(): NicheScenePhoto[] {
           const light = CINEMATIC_LIGHTING_MODES[lIdx];
           const localIdx = sIdx * 20 + setIdx * 5 + lIdx; // 0..99
           const unsplashId = bp.unsplashPool[localIdx % bp.unsplashPool.length];
-          // Varying crop focal parameters so each variation in the pool has distinct framing
-          const cropShift = (localIdx % 5) * 15;
-          const imageUrl = `https://images.unsplash.com/${unsplashId}?auto=format&fit=crop&w=1280&h=720&q=82&fp-y=${0.35 + (cropShift % 30) * 0.01}`;
-          const fallbackUrl = `https://picsum.photos/seed/kinetix-niche-${globalNumber}/1280/720`;
+          const imageUrl = `https://images.unsplash.com/${unsplashId}?auto=format&fit=crop&w=1080&q=82`;
+          const fallbackUrl = `https://picsum.photos/seed/kinetix-scene-${globalNumber}/1080/608`;
+          const title = `${setting} · ${light.label}`;
+          const svgBackupUrl = buildSvgSceneBackup(
+            globalNumber,
+            bp.niche,
+            subNiche,
+            title,
+            bp.primaryHex,
+            bp.secondaryHex,
+            bp.accentHex
+          );
 
           catalog.push({
             id: `scene-${String(globalNumber).padStart(4, '0')}`,
             number: globalNumber,
             niche: bp.niche,
             subNiche,
-            title: `${setting} · ${light.label}`,
+            title,
             cinematicAngle: light.label,
             keywords: [
               ...bp.keywordsBase,
@@ -486,6 +559,7 @@ function build1200NicheSceneCatalog(): NicheScenePhoto[] {
             ],
             imageUrl,
             fallbackUrl,
+            svgBackupUrl,
             primaryHex: bp.primaryHex,
             secondaryHex: bp.secondaryHex,
             accentHex: bp.accentHex,
@@ -517,17 +591,16 @@ export function matchBestScenesForBookPages(
   pages.forEach((page, idx) => {
     const textBlob = `${page.chapterTitle} ${page.pageText} ${page.keyQuote || ''}`.toLowerCase();
 
-    let pool =
+    const pool =
       preferredNiche && preferredNiche !== 'Auto'
         ? NICHE_SCENE_LIBRARY_1200.filter((item) => item.niche === preferredNiche)
         : NICHE_SCENE_LIBRARY_1200;
 
-    // Score items by keyword overlap
     let bestItem: NicheScenePhoto | null = null;
     let bestScore = -1;
 
     for (let i = 0; i < pool.length; i++) {
-      const candidate = pool[(i + idx * 17) % pool.length];
+      const candidate = pool[(i + idx * 9) % pool.length];
       if (usedIds.has(candidate.id)) continue;
 
       let score = 0;
@@ -542,7 +615,7 @@ export function matchBestScenesForBookPages(
       }
     }
 
-    const chosen = bestItem || pool[(idx * 19) % pool.length] || NICHE_SCENE_LIBRARY_1200[idx];
+    const chosen = bestItem || pool[(idx * 11) % pool.length] || NICHE_SCENE_LIBRARY_1200[idx];
     usedIds.add(chosen.id);
     result[idx] = chosen;
   });

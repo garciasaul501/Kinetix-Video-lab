@@ -191,7 +191,12 @@ export async function renderVideoBookToMp4Url(
     throw new Error('No se pudo inicializar el motor gráfico del Audiolibro en Video.');
   }
 
-  const renderDurationSec = Math.min(12.5, Math.max(8, pages.length * 2.0));
+  const fullBookDurationSec = Math.max(
+    12,
+    pages.reduce((acc, p) => acc + Math.max(5, Number(p.durationSec) || 8), 0),
+    Number(book.totalEstimatedSec) || 0
+  );
+  const renderDurationSec = Math.max(10, Math.min(20, pages.length * 2.2));
   const stream = canvas.captureStream(30);
 
   const mimeType =
@@ -469,7 +474,8 @@ export async function renderVideoBookToMp4Url(
       body: JSON.stringify({
         videoBase64,
         audioBase64: finalAudioB64 || undefined,
-        durationSec: renderDurationSec,
+        durationSec: fullBookDurationSec,
+        capturePassDurationSec: renderDurationSec,
       }),
     });
 
@@ -516,7 +522,11 @@ export async function renderSequenceToVideoUrl(
     throw new Error('No se pudo inicializar el contexto de renderizado de video.');
   }
 
-  const renderDurationSec = 7.2;
+  const fullSequenceDurationSec = Math.max(
+    10,
+    shots.reduce((acc, s) => acc + Math.max(3, Number(s.durationSec) || 4), 0)
+  );
+  const renderDurationSec = Math.max(8, Math.min(18, shots.length * 2.2));
   const stream = canvas.captureStream(30);
 
   const mimeType =
@@ -706,7 +716,8 @@ export async function renderSequenceToVideoUrl(
       body: JSON.stringify({
         videoBase64,
         audioBase64: audioBase64 || undefined,
-        durationSec: renderDurationSec,
+        durationSec: fullSequenceDurationSec,
+        capturePassDurationSec: renderDurationSec,
       }),
     });
 
@@ -722,7 +733,8 @@ export async function renderSequenceToVideoUrl(
 }
 
 /**
- * Exports audio (voiceover or sequence soundtrack) as a real downloadable .mp3 file.
+ * Exports audio (voiceover or sequence soundtrack) as a real downloadable .mp3 file
+ * and returns the MP3 Blob + Object URL so it can also be saved in the Audiobook Folder.
  */
 export async function downloadAudioAsMp3(options: {
   audioBase64?: string | null;
@@ -730,7 +742,8 @@ export async function downloadAudioAsMp3(options: {
   voiceGender?: string;
   durationSec?: number;
   filename?: string;
-}): Promise<void> {
+  skipBrowserDownload?: boolean;
+}): Promise<{ blob: Blob; objectUrl: string }> {
   const response = await fetch('/api/export-mp3', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -748,11 +761,14 @@ export async function downloadAudioAsMp3(options: {
 
   const mp3Blob = await response.blob();
   const url = URL.createObjectURL(mp3Blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = options.filename || 'kinetix-narracion.mp3';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 2500);
+  if (!options.skipBrowserDownload) {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = options.filename || 'kinetix-narracion.mp3';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+  return { blob: mp3Blob, objectUrl: url };
 }
+

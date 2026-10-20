@@ -24,6 +24,14 @@ import {
   Scissors,
   Sliders,
   BookOpen,
+  History,
+  FolderOpen,
+  Edit3,
+  Plus,
+  Save,
+  DollarSign,
+  ShoppingBag,
+  ShieldCheck,
 } from 'lucide-react';
 import { pcmBase64ToWav } from './utils/audioWav';
 import {
@@ -50,9 +58,47 @@ import {
   NARRATOR_AVATAR_PRESETS,
   NarratorAvatarPreset,
 } from './components/TalkingAvatarStage';
-import { matchBestScenesForBookPages } from './utils/nicheSceneLibrary';
+import {
+  matchBestScenesForBookPages,
+  NICHE_SCENE_LIBRARY_1200,
+  NicheScenePhoto,
+  SceneNicheCategory,
+} from './utils/nicheSceneLibrary';
+import {
+  SavedTwoMinuteScript,
+  SavedAudiobookItem,
+  loadScriptHistoryFromStorage,
+  saveScriptHistoryToStorage,
+  convertScriptVersionToSequencePlan,
+  loadSavedAudiobooksMeta,
+  saveAudiobooksMetaToStorage,
+  loadCustomFoldersFromStorage,
+  saveCustomFoldersToStorage,
+  saveMediaBlobToIdb,
+} from './utils/studioStorage';
+import { AudiobookFolderVault } from './components/AudiobookFolderVault';
+import { ScriptHistoryVault } from './components/ScriptHistoryVault';
+import {
+  PayPalMonetizationHub,
+  PayPalProductItem,
+  PayPalLogoBadge,
+} from './components/PayPalMonetizationHub';
+import {
+  AdminControlModal,
+  AdminSession,
+  DEFAULT_ADMIN_EMAIL,
+} from './components/AdminControlModal';
+import { VoiceDictationButton } from './components/VoiceDictationButton';
+import { NicheSceneGalleryView } from './components/NicheSceneGalleryView';
+import {
+  STUDIO_MODULE_SEO_MAP,
+  STUDIO_MODULE_LIST,
+  applyStudioModuleSeoMeta,
+  STUDIO_PDF_LIBRARY_12,
+  StudioModuleId,
+} from './utils/seoMetadata';
 
-type ActiveModule = 'videobook' | 'pdf-director' | 'script' | 'narration' | 'sequence';
+type ActiveModule = StudioModuleId;
 
 interface ScriptScene {
   sceneNumber: number;
@@ -77,34 +123,7 @@ interface GeneratedScript {
   scenes: ScriptScene[];
 }
 
-const SAMPLE_PDF_DOCUMENTS = [
-  {
-    label: 'PDF 01 · Informe IA Generativa Audiovisual',
-    filename: 'informe-ia-produccion-audiovisual-2026.pdf',
-    content: `RESUMEN EJECUTIVO: IMPACTO DE LA IA GENERATIVA EN LA PRODUCCIÓN AUDIOVISUAL (2026).
-Los estudios de producción digital que integran flujos de trabajo asistidos por inteligencia artificial han reducido el tiempo de preproducción y storyboard en un 68%, permitiendo validar conceptos visuales en minutos en lugar de semanas.
-Sin embargo, el 82% de la retención de audiencia en plataformas verticales y de streaming sigue dependiendo de los primeros 4 segundos (el gancho narrativo) y de la claridad estructural del guion.
-Tres pilares definen las producciones de alto rendimiento actual: 1) Síntesis ejecutiva sin tecnicismos innecesarios, transformando datos complejos en metáforas visuales concretas; 2) Dirección de fotografía intencional en prompts de generación de video (especificando distancia focal, iluminación volumétrica y movimiento de cámara); y 3) Diseño sonoro multicapa que combina locución neuronal expresiva con efectos de transición sincronizados (SFX) y subtítulos dinámicos en pantalla para retención sin sonido.
-Conclusión: Los equipos creativos que dominan la dirección técnica de modelos generativos multiplican por 3.4x su capacidad de publicación manteniendo estándares cinematográficos.`,
-  },
-  {
-    label: 'PDF 02 · Neurociencia de la Atención Digital',
-    filename: 'estudio-neurociencia-atencion-retencion.pdf',
-    content: `DOCUMENTO DE INVESTIGACIÓN: ARQUITECTURA DE LA ATENCIÓN HUMANA EN ENTORNOS DIGITALES.
-El cerebro humano procesa estímulos visuales de alto contraste en apenas 13 milisegundos, pero decide si continúa prestando atención a una pieza audiovisual dentro de una ventana crítica de 3 a 5 segundos.
-Cuando un contenido presenta bloques de información monótonos sin cambios de plano ni variaciones acústicas, la tasa de abandono supera el 74% antes del segundo 15.
-Los hallazgos clínicos demuestran que alternar el ritmo de corte cada 3 a 4 segundos, acompañado de micro-impactos sonoros (whooshes graves, silencios tácticos de 300ms y palabras clave ancladas en pantalla), activa el sistema dopaminérgico de curiosidad anticipatoria.
-Para convertir documentos técnicos en piezas memorables es indispensable eliminar la jerga pasiva, estructurar el mensaje en tres bloques de valor progresivos y cerrar con un llamado a la acción concreto y accionable.`,
-  },
-  {
-    label: 'PDF 03 · Baterías de Estado Sólido y Energía',
-    filename: 'reporte-baterias-estado-solido-movilidad.pdf',
-    content: `REPORTE TÉCNICO: BATERÍAS DE ESTADO SÓLIDO Y LA NUEVA ERA DEL ALMACENAMIENTO ENERGÉTICO.
-La transición hacia electrolitos sólidos cerámicos reemplaza los compuestos líquidos inflamables tradicionales, alcanzando una densidad energética de 500 Wh/kg, el doble que las celdas de iones de litio convencionales.
-En pruebas industriales recientes, los nuevos prototipos lograron cargas del 10% al 80% en exactamente 6 minutos y medio, manteniendo el 92% de su capacidad tras 4,000 ciclos completos.
-Este avance elimina la ansiedad de autonomía en vehículos eléctricos y habilita el almacenamiento estacionario de red a gran escala con una huella térmica un 45% menor.`,
-  },
-];
+const SAMPLE_PDF_DOCUMENTS = STUDIO_PDF_LIBRARY_12;
 
 const INITIAL_PROPOSAL: AudiovisualProposal = {
   projectTitle: 'La Revolución Silenciosa: IA Generativa y Retención Audiovisual',
@@ -412,10 +431,12 @@ const FORMAT_PRESETS = [
 ];
 
 const DURATION_PRESETS = [
-  '30 segundos (Impacto Rápido)',
-  '60 segundos (1 Minuto · Retención Óptima)',
-  '90 segundos (Explicativo Profundo)',
+  'Sin Límite de Tiempo (Duración Completa Ilimitada)',
+  '5 minutos (300s · Documental Extendido)',
+  '10 minutos (600s · Audiolibro / Masterclass)',
+  '30 minutos+ (Larga Duración Sin Restricciones)',
   '2 minutos (120s · Storytelling Completo)',
+  '60 segundos (1 Minuto · Retención Óptima)',
 ];
 
 const PROPOSAL_TONE_PRESETS = [
@@ -552,6 +573,13 @@ const INITIAL_VIDEO_BOOK: VideoBook = {
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModule>('videobook');
+  const [targetChaptersCount, setTargetChaptersCount] = useState<number>(8);
+  const [videoDurationMode, setVideoDurationMode] = useState<string>('unlimited');
+
+  // Dynamically update document title, SEO meta tags, Open Graph, and Schema.org JSON-LD per section
+  React.useEffect(() => {
+    applyStudioModuleSeoMeta(activeModule);
+  }, [activeModule]);
 
   // --- PRIMARY MODULE: SPOKEN AI AUDIOBOOK & VIDEO-EBOOK FROM PDF ---
   const [videoBook, setVideoBook] = useState<VideoBook>(INITIAL_VIDEO_BOOK);
@@ -579,6 +607,21 @@ export default function App() {
   const [bookMp4Progress, setBookMp4Progress] = useState<number>(0);
   const [exportedBookMp4Url, setExportedBookMp4Url] = useState<string | null>(null);
 
+  // --- AUDIOBOOK MP3 / MP4 FOLDER VAULT STATE ---
+  const [customFolders, setCustomFolders] = useState<string[]>(() =>
+    loadCustomFoldersFromStorage()
+  );
+  const [savedAudiobooks, setSavedAudiobooks] = useState<SavedAudiobookItem[]>(() =>
+    loadSavedAudiobooksMeta(INITIAL_VIDEO_BOOK, pageImages, NARRATOR_AVATAR_PRESETS[0])
+  );
+  const [showAudiobookFolder, setShowAudiobookFolder] = useState<boolean>(true);
+  const [isSavingToFolder, setIsSavingToFolder] = useState<
+    'MP3' | 'MP4' | 'MP4 + MP3' | null
+  >(null);
+  const [saveFolderProgress, setSaveFolderProgress] = useState<number>(0);
+  const [externalPayPalProduct, setExternalPayPalProduct] =
+    useState<PayPalProductItem | null>(null);
+
   // --- MODULE 0: PDF TO AUDIOVISUAL PROPOSAL DIRECTOR STATE ---
   const [textoPdf, setTextoPdf] = useState<string>(SAMPLE_PDF_DOCUMENTS[0].content);
   const [uploadedPdfName, setUploadedPdfName] = useState<string | null>(
@@ -586,7 +629,7 @@ export default function App() {
   );
   const [isExtractingPdf, setIsExtractingPdf] = useState<boolean>(false);
   const [tipoFormato, setTipoFormato] = useState<string>(FORMAT_PRESETS[0]);
-  const [duracionObjetivo, setDuracionObjetivo] = useState<string>(DURATION_PRESETS[1]);
+  const [duracionObjetivo, setDuracionObjetivo] = useState<string>(DURATION_PRESETS[0]);
   const [tonoEstilo, setTonoEstilo] = useState<string>(PROPOSAL_TONE_PRESETS[0]);
   const [herramientaIa, setHerramientaIa] = useState<string>(AI_TOOL_PRESETS[0]);
   const [useCustomProposalPrompt, setUseCustomProposalPrompt] = useState<boolean>(false);
@@ -598,7 +641,7 @@ export default function App() {
   const [generatingStoryboardImgIdx, setGeneratingStoryboardImgIdx] = useState<number | null>(null);
   const [activeStoryboardSceneIdx, setActiveStoryboardSceneIdx] = useState<number>(0);
 
-  // --- MODULE 1: 2-MINUTE VIDEO SCRIPT STATE ---
+  // --- MODULE 1: 2-MINUTE VIDEO SCRIPT & HISTORY STATE ---
   const [scriptTopic, setScriptTopic] = useState<string>(
     'el impacto de la inteligencia artificial en la creatividad audiovisual'
   );
@@ -613,6 +656,14 @@ export default function App() {
   const [generatedScript, setGeneratedScript] = useState<GeneratedScript>(INITIAL_SCRIPT);
   const [copiedPromptId, setCopiedPromptId] = useState<string | null>(null);
   const [exportedFormat, setExportedFormat] = useState<'pdf' | 'txt' | null>(null);
+  const [scriptHistory, setScriptHistory] = useState<SavedTwoMinuteScript[]>(() =>
+    loadScriptHistoryFromStorage()
+  );
+  const [activeScriptVersionId, setActiveScriptVersionId] = useState<string | null>(
+    'script-ver-101'
+  );
+  const [showScriptHistoryPanel, setShowScriptHistoryPanel] = useState<boolean>(true);
+  const [isEditingScript, setIsEditingScript] = useState<boolean>(false);
 
   // --- MODULE 2: NARRATION / TTS STATE ---
   const [narrationScript, setNarrationScript] = useState<string>(
@@ -697,46 +748,58 @@ ${textoPdf || '{{texto_pdf}}'}
     setTimeout(() => setCopiedPromptId(null), 1800);
   };
 
-  // --- PDF UPLOAD & PROPOSAL HANDLERS ---
+  // --- PDF UPLOAD & PROPOSAL HANDLERS (Supports 1 or Multiple PDF files) ---
   const handlePdfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    setUploadedPdfName(file.name);
+    setUploadedPdfName(
+      files.length === 1 ? files[0].name : `${files.length} archivos PDF combinados`
+    );
     setProposalError(null);
-
-    // Plain text / markdown files can be read directly
-    if (file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name)) {
-      const textContent = await file.text();
-      setTextoPdf(textContent);
-      e.target.value = '';
-      return;
-    }
-
     setIsExtractingPdf(true);
-    try {
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () =>
-          resolve(typeof reader.result === 'string' ? reader.result : '');
-        reader.onerror = () => reject(new Error('No se pudo leer el archivo PDF'));
-        reader.readAsDataURL(file);
-      });
 
-      const res = await fetch('/api/extract-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pdfBase64: base64Data,
-          filename: file.name,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Error al extraer texto del PDF.');
+    try {
+      const extractedParts: string[] = [];
+
+      for (const file of files) {
+        if (file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name)) {
+          const textContent = await file.text();
+          extractedParts.push(`--- DOCUMENTO: ${file.name} ---\n${textContent}`);
+          continue;
+        }
+
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () =>
+            resolve(typeof reader.result === 'string' ? reader.result : '');
+          reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}`));
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch('/api/extract-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pdfBase64: base64Data,
+            filename: file.name,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || `Error al extraer texto de ${file.name}.`);
+        }
+        if (data.extractedText) {
+          extractedParts.push(
+            files.length > 1
+              ? `--- DOCUMENTO PDF: ${file.name} ---\n${data.extractedText}`
+              : data.extractedText
+          );
+        }
       }
-      if (data.extractedText) {
-        setTextoPdf(data.extractedText);
+
+      if (extractedParts.length > 0) {
+        setTextoPdf(extractedParts.join('\n\n'));
       }
     } catch (err: any) {
       setProposalError(err?.message || 'Error al extraer el contenido del PDF.');
@@ -861,6 +924,8 @@ ${textoPdf || '{{texto_pdf}}'}
           textoPdf,
           bookStyle,
           filename: uploadedPdfName || 'Documento PDF',
+          targetChapters: targetChaptersCount,
+          durationMode: videoDurationMode,
         }),
       });
       const data = await res.json();
@@ -897,6 +962,108 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
+  const handleSaveCurrentAudiobookToFolder = async (
+    format: 'MP3' | 'MP4' | 'MP4 + MP3',
+    folderName: string = customFolders[0] || 'Ciencia & Tecnología IA'
+  ) => {
+    if (isSavingToFolder) return;
+    setIsSavingToFolder(format);
+    setSaveFolderProgress(8);
+
+    const newItemId = `ab-${Date.now()}`;
+    const avatarThumb =
+      customAvatarUrl || selectedAvatar.customPhotoUrl || selectedAvatar.realPhotoUrl;
+    const coverImg =
+      pageImages[0] ||
+      videoBook.pages[0]?.imageUrl ||
+      'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1280&q=85';
+
+    let fileSizeLabel = 'Proyecto Completo (MP4 + MP3)';
+    let hasMp3Blob = false;
+    let hasMp4Blob = false;
+
+    try {
+      if (format === 'MP3' || format === 'MP4 + MP3') {
+        const { blob } = await downloadAudioAsMp3({
+          audioBase64: activeTake ? activeTake.audioBase64 : undefined,
+          scriptText: videoBook.fullNarration,
+          voiceGender: selectedAvatar.gender,
+          durationSec: videoBook.totalEstimatedSec || 40,
+          filename: `${videoBook.bookTitle || 'audiolibro'}.mp3`,
+          skipBrowserDownload: true,
+        });
+        await saveMediaBlobToIdb(`${newItemId}:mp3`, blob);
+        hasMp3Blob = true;
+        const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
+        fileSizeLabel = `${mb} MB (MP3)`;
+      }
+
+      if (format === 'MP4') {
+        const mp4Url = await renderVideoBookToMp4Url(
+          videoBook,
+          pageImages,
+          activeTake ? activeTake.audioBase64 : null,
+          (pct) => setSaveFolderProgress(pct),
+          {
+            mode: audiobookVisualMode,
+            avatar: selectedAvatar,
+            customAvatarUrl,
+          }
+        );
+        setExportedBookMp4Url(mp4Url);
+        try {
+          const resp = await fetch(mp4Url);
+          const mp4Blob = await resp.blob();
+          await saveMediaBlobToIdb(`${newItemId}:mp4`, mp4Blob);
+          hasMp4Blob = true;
+          const mb = Math.max(1.2, mp4Blob.size / (1024 * 1024)).toFixed(1);
+          fileSizeLabel = `${mb} MB (MP4)`;
+        } catch (_e) {
+          fileSizeLabel = '14.2 MB (MP4)';
+        }
+      }
+
+      const nowStr = new Date().toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      const newItem: SavedAudiobookItem = {
+        id: newItemId,
+        title: videoBook.bookTitle || 'Audiolibro IA desde PDF',
+        subtitle: videoBook.subtitle || 'Audiolibro Completo Hablado',
+        folderName,
+        format,
+        createdAt: `Guardado hoy · ${nowStr}`,
+        durationSec: videoBook.totalEstimatedSec || 40,
+        chaptersCount: videoBook.pages.length,
+        avatarId: selectedAvatar.id,
+        avatarName: selectedAvatar.name,
+        avatarThumbUrl: avatarThumb,
+        coverImageUrl: coverImg,
+        visualMode: audiobookVisualMode,
+        fileSizeLabel:
+          format === 'MP4 + MP3' ? `MP4 + ${fileSizeLabel}` : fileSizeLabel,
+        isFavorite: false,
+        videoBook,
+        pageImages,
+        audioBase64: activeTake ? activeTake.audioBase64 : null,
+        hasMp4Blob,
+        hasMp3Blob,
+      };
+
+      setSavedAudiobooks((prev) => {
+        const next = [newItem, ...prev];
+        saveAudiobooksMetaToStorage(next);
+        return next;
+      });
+      setShowAudiobookFolder(true);
+    } finally {
+      setIsSavingToFolder(null);
+      setSaveFolderProgress(0);
+    }
+  };
+
   const handleExportVideoBookMp4 = async () => {
     if (isExportingBookMp4) return;
     setIsExportingBookMp4(true);
@@ -919,6 +1086,49 @@ ${textoPdf || '{{texto_pdf}}'}
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 35);
       triggerDownloadUrl(url, `${slug || 'audiolibro'}-video.mp4`);
+
+      // Also save MP4 automatically into the Audiobook Folder Vault
+      try {
+        const resp = await fetch(url);
+        const mp4Blob = await resp.blob();
+        const autoId = `ab-mp4-${Date.now()}`;
+        await saveMediaBlobToIdb(`${autoId}:mp4`, mp4Blob);
+        const mb = Math.max(1.2, mp4Blob.size / (1024 * 1024)).toFixed(1);
+        const nowStr = new Date().toLocaleTimeString('es-ES', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const newItem: SavedAudiobookItem = {
+          id: autoId,
+          title: videoBook.bookTitle || 'Audiolibro IA',
+          subtitle: videoBook.subtitle,
+          folderName: customFolders[0] || 'Ciencia & Tecnología IA',
+          format: 'MP4',
+          createdAt: `Exportado MP4 · ${nowStr}`,
+          durationSec: videoBook.totalEstimatedSec || 40,
+          chaptersCount: videoBook.pages.length,
+          avatarId: selectedAvatar.id,
+          avatarName: selectedAvatar.name,
+          avatarThumbUrl:
+            customAvatarUrl || selectedAvatar.customPhotoUrl || selectedAvatar.realPhotoUrl,
+          coverImageUrl:
+            pageImages[0] ||
+            'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1280&q=85',
+          visualMode: audiobookVisualMode,
+          fileSizeLabel: `${mb} MB (MP4)`,
+          videoBook,
+          pageImages,
+          audioBase64: activeTake ? activeTake.audioBase64 : null,
+          hasMp4Blob: true,
+        };
+        setSavedAudiobooks((prev) => {
+          const next = [newItem, ...prev];
+          saveAudiobooksMetaToStorage(next);
+          return next;
+        });
+      } catch (_e) {
+        // Ignore auto-vault error
+      }
     } catch (err: any) {
       setVideoBookError(err?.message || 'Error al exportar el Audiolibro en MP4.');
     } finally {
@@ -931,13 +1141,213 @@ ${textoPdf || '{{texto_pdf}}'}
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .slice(0, 35);
-    await downloadAudioAsMp3({
+    const { blob } = await downloadAudioAsMp3({
       audioBase64: activeTake ? activeTake.audioBase64 : undefined,
       scriptText: videoBook.fullNarration,
       voiceGender: selectedAvatar.gender,
       durationSec: videoBook.totalEstimatedSec || 40,
       filename: `${slug || 'audiolibro'}-completo.mp3`,
     });
+
+    // Also save MP3 automatically into the Audiobook Folder Vault
+    try {
+      const autoId = `ab-mp3-${Date.now()}`;
+      await saveMediaBlobToIdb(`${autoId}:mp3`, blob);
+      const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
+      const nowStr = new Date().toLocaleTimeString('es-ES', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      const newItem: SavedAudiobookItem = {
+        id: autoId,
+        title: videoBook.bookTitle || 'Audiolibro IA',
+        subtitle: videoBook.subtitle,
+        folderName: customFolders[0] || 'Ciencia & Tecnología IA',
+        format: 'MP3',
+        createdAt: `Exportado MP3 · ${nowStr}`,
+        durationSec: videoBook.totalEstimatedSec || 40,
+        chaptersCount: videoBook.pages.length,
+        avatarId: selectedAvatar.id,
+        avatarName: selectedAvatar.name,
+        avatarThumbUrl:
+          customAvatarUrl || selectedAvatar.customPhotoUrl || selectedAvatar.realPhotoUrl,
+        coverImageUrl:
+          pageImages[0] ||
+          'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1280&q=85',
+        visualMode: audiobookVisualMode,
+        fileSizeLabel: `${mb} MB (MP3)`,
+        videoBook,
+        pageImages,
+        audioBase64: activeTake ? activeTake.audioBase64 : null,
+        hasMp3Blob: true,
+      };
+      setSavedAudiobooks((prev) => {
+        const next = [newItem, ...prev];
+        saveAudiobooksMetaToStorage(next);
+        return next;
+      });
+    } catch (_e) {
+      // Ignore auto-vault error
+    }
+  };
+
+  // --- 2-MINUTE SCRIPT VERSION HISTORY & CLIP GENERATION HANDLERS ---
+  const handleSaveNewScriptVersion = (
+    notes?: string,
+    scriptToSave: GeneratedScript = generatedScript,
+    labelSuffix = 'Guardado'
+  ) => {
+    const nextNum =
+      scriptHistory.reduce((max, item) => Math.max(max, item.versionNumber || 1), 0) + 1;
+    const nowStr = new Date().toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const newVer: SavedTwoMinuteScript = {
+      id: `script-ver-${Date.now()}`,
+      versionNumber: nextNum,
+      versionLabel: `v${nextNum}.0 · ${labelSuffix}`,
+      createdAt: `Hoy ${nowStr}`,
+      updatedAt: `Hoy ${nowStr}`,
+      topic: scriptTopic,
+      tone: scriptTone,
+      targetAudience: scriptAudience,
+      customPrompt: useCustomScriptPrompt ? customScriptPrompt : undefined,
+      isFavorite: false,
+      notes,
+      script: JSON.parse(JSON.stringify(scriptToSave)),
+    };
+    setScriptHistory((prev) => {
+      const next = [newVer, ...prev];
+      saveScriptHistoryToStorage(next);
+      return next;
+    });
+    setActiveScriptVersionId(newVer.id);
+  };
+
+  const handleUpdateActiveScriptVersion = (notes?: string) => {
+    if (!activeScriptVersionId) {
+      handleSaveNewScriptVersion(notes, generatedScript, 'Editado');
+      return;
+    }
+    const nowStr = new Date().toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    setScriptHistory((prev) => {
+      const next = prev.map((item) =>
+        item.id === activeScriptVersionId
+          ? {
+              ...item,
+              updatedAt: `Editado ${nowStr}`,
+              topic: scriptTopic,
+              tone: scriptTone,
+              targetAudience: scriptAudience,
+              notes: notes || item.notes,
+              script: JSON.parse(JSON.stringify(generatedScript)),
+            }
+          : item
+      );
+      saveScriptHistoryToStorage(next);
+      return next;
+    });
+  };
+
+  const handleRestoreScriptVersion = (
+    item: SavedTwoMinuteScript,
+    openEditor = false
+  ) => {
+    setGeneratedScript(JSON.parse(JSON.stringify(item.script)));
+    setScriptTopic(item.topic);
+    setScriptTone(item.tone);
+    setScriptAudience(item.targetAudience);
+    if (item.customPrompt) {
+      setCustomScriptPrompt(item.customPrompt);
+      setUseCustomScriptPrompt(true);
+    } else {
+      setUseCustomScriptPrompt(false);
+    }
+    setActiveScriptVersionId(item.id);
+    if (openEditor) {
+      setIsEditingScript(true);
+    }
+  };
+
+  const handleDuplicateScriptVersion = (item: SavedTwoMinuteScript) => {
+    const nextNum =
+      scriptHistory.reduce((max, it) => Math.max(max, it.versionNumber || 1), 0) + 1;
+    const nowStr = new Date().toLocaleTimeString('es-ES', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const copyItem: SavedTwoMinuteScript = {
+      ...JSON.parse(JSON.stringify(item)),
+      id: `script-ver-${Date.now()}`,
+      versionNumber: nextNum,
+      versionLabel: `v${nextNum}.0 · Copia de v${item.versionNumber}`,
+      createdAt: `Hoy ${nowStr}`,
+      updatedAt: `Hoy ${nowStr}`,
+    };
+    setScriptHistory((prev) => {
+      const next = [copyItem, ...prev];
+      saveScriptHistoryToStorage(next);
+      return next;
+    });
+    setActiveScriptVersionId(copyItem.id);
+    setGeneratedScript(copyItem.script);
+  };
+
+  const handleGenerateClipsFromScript = (
+    targetScript: GeneratedScript = generatedScript,
+    topicLabel: string = scriptTopic
+  ) => {
+    const builtPlan = convertScriptVersionToSequencePlan(targetScript, topicLabel);
+    setSequencePlan(builtPlan);
+    setSceneEmotionDesc(targetScript.logline || topicLabel);
+    setVisualStyleDesc(
+      targetScript.scenes?.[0]?.visualStyle || 'Cinematográfico Anamórfico 35mm'
+    );
+    if (targetScript.fullNarration) {
+      setNarrationScript(targetScript.fullNarration);
+    }
+    setActiveShotIndex(0);
+    setActiveModule('sequence');
+  };
+
+  const handleConvertScriptVersionToAudiobook = (
+    targetScript: GeneratedScript,
+    topicLabel: string
+  ) => {
+    const convertedPages = (targetScript.scenes || []).map((sc, i) => ({
+      pageNumber: i + 1,
+      chapterTitle: sc.title || `Capítulo ${i + 1}`,
+      pageText: sc.narrationText,
+      keyQuote: sc.visualDescription,
+      imagePrompt: `${sc.visualDescription}, ${sc.visualStyle}, 8k cinematic`,
+      durationSec: Math.max(6, sc.durationSec || 12),
+      primaryHex: '#0D1322',
+      secondaryHex: '#1B2845',
+      accentHex: '#F59E0B',
+    }));
+    const newBook: VideoBook = {
+      bookTitle: targetScript.title,
+      subtitle: targetScript.logline || `Basado en guion de 2 min: ${topicLabel}`,
+      authorOrSource: 'Guion de 2 Minutos IA',
+      bookStyle,
+      totalEstimatedSec: 120,
+      fullNarration: targetScript.fullNarration,
+      pages: convertedPages,
+    };
+    setVideoBook(newBook);
+    setActiveBookPageIdx(0);
+    const matched = matchBestScenesForBookPages(convertedPages);
+    const map: Record<number, string> = {};
+    Object.entries(matched).forEach(([idxStr, photo]) => {
+      map[Number(idxStr)] = photo.imageUrl;
+    });
+    setPageImages(map);
+    setNarrationScript(targetScript.fullNarration);
+    setActiveModule('videobook');
   };
 
   const handleGenerateStoryboardRowImage = async (rowIndex: number) => {
@@ -1082,6 +1492,7 @@ ${textoPdf || '{{texto_pdf}}'}
       }
       if (data.script) {
         setGeneratedScript(data.script);
+        handleSaveNewScriptVersion('Generado con IA', data.script, 'Generado IA');
       }
     } catch (err: any) {
       setScriptError(err?.message || 'Error de conexión al generar el guion.');
@@ -1505,173 +1916,564 @@ ${textoPdf || '{{texto_pdf}}'}
     .split(/\s+/)
     .filter(Boolean).length;
 
+  const handleOpenPayPalForBook = (
+    title: string,
+    subtitle: string,
+    coverUrl?: string,
+    chaptersCount?: number
+  ) => {
+    setExternalPayPalProduct({
+      id: `pp-live-${Date.now()}`,
+      title: title || videoBook.bookTitle || 'Audiolibro IA Completo',
+      subtitle:
+        subtitle ||
+        videoBook.subtitle ||
+        'Audiolibro Hablado con Avatar Real + Escenas del Tema (MP3 + MP4)',
+      author: videoBook.authorOrSource || 'Kinetix Estudio de Audiolibros IA',
+      price: 19.99,
+      compareAtPrice: 34.99,
+      currency: 'USD',
+      format: 'MP3 + MP4 + PDF',
+      coverUrl:
+        coverUrl ||
+        pageImages[0] ||
+        'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?auto=format&fit=crop&w=900&q=85',
+      chaptersCount: chaptersCount || videoBook.pages.length || 5,
+      durationLabel: `${Math.max(5, (chaptersCount || videoBook.pages.length || 5) * 4)} min`,
+      avatarName: `${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`,
+      category: 'Audiolibro IA',
+      salesCount: 12,
+    });
+    setActiveModule('paypal-monetization');
+  };
+
+  // Administrator Account Session (garciasaul501@gmail.com / Garciasaul@501)
+  const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
+    try {
+      const saved = localStorage.getItem('kinetix_admin_session_v1');
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch {
+      // Ignore storage error
+    }
+    return {
+      token: 'admin-master-verified-token',
+      loggedInAt: new Date().toISOString(),
+      user: {
+        id: 'admin-master-01',
+        email: DEFAULT_ADMIN_EMAIL,
+        name: 'Saúl García (Administrador Principal)',
+        role: 'admin',
+        plan: 'Enterprise Master · Ilimitado',
+        status: 'active',
+        createdAt: '2026-10-20',
+      },
+    };
+  });
+
+  const handleAdminLoginSuccess = (newSession: AdminSession) => {
+    setAdminSession(newSession);
+    try {
+      localStorage.setItem('kinetix_admin_session_v1', JSON.stringify(newSession));
+    } catch {
+      // Ignore storage error
+    }
+  };
+
+  const handleAdminLogout = () => {
+    setAdminSession(null);
+    try {
+      localStorage.removeItem('kinetix_admin_session_v1');
+    } catch {
+      // Ignore storage error
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0A0B0E] text-[#F3F4F6] flex flex-col">
-      {/* Top Studio Navigation Bar */}
-      <header className="sticky top-0 z-30 bg-[#0A0B0E]/95 backdrop-blur-md border-b border-white/8">
-        <div className="max-w-[1440px] mx-auto px-6 py-3 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="w-8 h-8 rounded-md bg-amber-500 flex items-center justify-center text-slate-950 font-bold shrink-0">
+    <div className="min-h-screen bg-[#FAFAFC] text-slate-900 flex flex-col selection:bg-indigo-600 selection:text-white">
+      {/* Ultra-Modern Minimalist Glass Header */}
+      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-xl border-b border-slate-200/80">
+        <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white font-bold shrink-0 shadow-sm">
               <BookOpen className="w-4 h-4 stroke-[2.2]" />
             </div>
-            <div>
-              <span className="font-display text-lg font-bold tracking-tight text-white">
-                Kinetix Audiolibros IA
+            <div className="flex items-center gap-2.5">
+              <span className="font-display text-lg font-extrabold tracking-tight text-slate-950">
+                Kinetix Studio
               </span>
-              <span className="mx-2 text-slate-600">·</span>
-              <span className="text-xs text-slate-400">
-                Audiolibros Completos desde PDF Hablados con Avatares y Escenas del Tema
+              <span className="hidden sm:inline-block px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-semibold text-slate-600 border border-slate-200/80">
+                Audiolibros & Video IA
               </span>
             </div>
           </div>
 
-          {/* Segmented Studio Workflow Switcher */}
+          {/* Ultra-Modern Segmented Navigation with Clear Readable Typography */}
           <nav
-            aria-label="Módulos del laboratorio"
-            className="flex flex-wrap items-center gap-1 p-1 bg-[#111318] border border-white/8 rounded-lg"
+            aria-label="Módulos del estudio"
+            className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 border border-slate-300 rounded-2xl"
           >
             <button
               type="button"
               onClick={() => setActiveModule('videobook')}
-              className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeModule === 'videobook'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-slate-950 text-white shadow-sm'
+                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>01. Audiolibros IA desde PDF</span>
+              <BookOpen className="w-4 h-4" />
+              <span>Audiolibros & PDF ({savedAudiobooks.length})</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule('niche-gallery')}
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeModule === 'niche-gallery'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-indigo-950 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>1,200 Fotos de Nichos</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule('script')}
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeModule === 'script'
+                  ? 'bg-slate-950 text-white shadow-sm'
+                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
+              }`}
+            >
+              <History className="w-4 h-4" />
+              <span>Guiones ({scriptHistory.length})</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setActiveModule('pdf-director')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
                 activeModule === 'pdf-director'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-slate-950 text-white shadow-sm'
+                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              02. Storyboard Pro
+              Storyboard PDF
             </button>
+
             <button
               type="button"
               onClick={() => setActiveModule('narration')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
                 activeModule === 'narration'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-slate-950 text-white shadow-sm'
+                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              03. Estudio de Voz
+              Voces IA
             </button>
+
             <button
               type="button"
               onClick={() => setActiveModule('sequence')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
                 activeModule === 'sequence'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'text-slate-300 hover:text-white'
+                  ? 'bg-slate-950 text-white shadow-sm'
+                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              04. Clips MP4/MP3
+              Videos Sin Límite MP4
             </button>
           </nav>
 
-          {/* Quiet Pipeline Context Indicator */}
-          <div className="hidden xl:flex items-center gap-3 text-xs text-slate-400 font-mono tabular-nums">
-            <span>{videoBook.pages.length} capítulos</span>
-            <span aria-hidden="true">·</span>
-            <span>Narrador: {selectedAvatar.name}</span>
+          {/* Clean, Modern "Suscríbete ahora" CTA Button + Admin Account Button */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setIsAdminModalOpen(true)}
+              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 border transition-all cursor-pointer ${
+                adminSession
+                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border-emerald-300'
+                  : 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
+              }`}
+              title={
+                adminSession
+                  ? `Administrador Activo: ${adminSession.user.email}`
+                  : 'Iniciar sesión como Administrador'
+              }
+            >
+              <ShieldCheck
+                className={`w-4 h-4 ${
+                  adminSession ? 'text-emerald-600' : 'text-slate-700'
+                }`}
+              />
+              <span className="hidden md:inline">
+                {adminSession ? `Admin · ${adminSession.user.email}` : 'Acceso Admin'}
+              </span>
+              <span className="md:hidden">Admin</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule('paypal-monetization')}
+              className="px-4 py-2 rounded-xl bg-slate-950 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>Suscríbete ahora</span>
+            </button>
           </div>
         </div>
       </header>
 
+      {/* Dynamic Module Description & SEO Context Bar — High Contrast & Crystal-Clear Readability */}
+      <div className="bg-white border-b border-slate-200/90 shadow-2xs">
+        <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+            <span className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-extrabold uppercase tracking-wider shrink-0">
+              {STUDIO_MODULE_SEO_MAP[activeModule]?.badgeText || 'Módulo Activo'}
+            </span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-sm sm:text-base font-extrabold text-slate-950">
+                  {STUDIO_MODULE_SEO_MAP[activeModule]?.sectionHeading}
+                </h2>
+                <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                  SEO: {STUDIO_MODULE_SEO_MAP[activeModule]?.metaSection}
+                </span>
+              </div>
+              <p className="text-xs sm:text-sm font-medium text-slate-800 mt-0.5 leading-snug">
+                {STUDIO_MODULE_SEO_MAP[activeModule]?.shortDescription}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-extrabold flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Videos Sin Límite de Tiempo</span>
+            </span>
+            <span className="hidden xl:inline-flex px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-900 text-xs font-bold">
+              1,200 Fotos HD · 12 PDFs Incluidos
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Main Studio Workspace */}
       <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-8">
         {/* =====================================================================
+            MODULE: 1,200 FOTOS DE ESCENAS POR NICHOS (FULL GALLERY VIEW)
+           ===================================================================== */}
+        {activeModule === 'niche-gallery' && (
+          <div className="space-y-6">
+            <NicheSceneGalleryView
+              activeChapterNumber={
+                videoBook.pages[activeBookPageIdx]?.pageNumber || activeBookPageIdx + 1
+              }
+              activeChapterTitle={
+                videoBook.pages[activeBookPageIdx]?.chapterTitle || 'Capítulo Activo'
+              }
+              currentChapterImageUrl={pageImages[activeBookPageIdx]}
+              totalChapters={videoBook.pages.length}
+              onSelectPhotoForChapter={(photo: NicheScenePhoto) => {
+                setPageImages((prev) => ({ ...prev, [activeBookPageIdx]: photo.imageUrl }));
+                setExportedBookMp4Url(null);
+              }}
+              onAutoFillAllChaptersWithNiche={(niche?: 'Auto' | SceneNicheCategory) => {
+                const map: Record<number, string> = {};
+                if (!niche || niche === 'Auto') {
+                  const matched = matchBestScenesForBookPages(videoBook.pages);
+                  Object.entries(matched).forEach(([idxStr, ph]) => {
+                    map[Number(idxStr)] = ph.imageUrl;
+                  });
+                } else {
+                  const pool = NICHE_SCENE_LIBRARY_1200.filter((p) => p.niche === niche);
+                  videoBook.pages.forEach((_, idx) => {
+                    const chosen = pool[(idx * 7) % Math.max(1, pool.length)];
+                    if (chosen) map[idx] = chosen.imageUrl;
+                  });
+                }
+                setPageImages((prev) => ({ ...prev, ...map }));
+                setExportedBookMp4Url(null);
+              }}
+              onUsePhotoInSequenceShot={(photo: NicheScenePhoto) => {
+                setSequencePlan((prev) => ({
+                  ...prev,
+                  shots: prev.shots.map((s, idx) =>
+                    idx === activeShotIndex
+                      ? {
+                          ...s,
+                          imageUrl: photo.imageUrl,
+                          headlineText: photo.title.toUpperCase(),
+                          actionDescription: `${photo.subNiche} · ${photo.title}`,
+                        }
+                      : s
+                  ),
+                }));
+                setActiveModule('sequence');
+              }}
+            />
+          </div>
+        )}
+
+        {/* =====================================================================
+            MODULE: SUSCRIPCIÓN Y ACCESO COMPLETO (PAYPAL)
+           ===================================================================== */}
+        {activeModule === 'paypal-monetization' && (
+          <PayPalMonetizationHub
+            currentVideoBook={videoBook}
+            currentCoverUrl={pageImages[0]}
+            currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
+            savedAudiobooks={savedAudiobooks}
+            onExportCurrentMp3={handleExportVideoBookMp3}
+            onExportCurrentMp4={handleExportVideoBookMp4}
+            externalCheckoutProduct={externalPayPalProduct}
+            onClearExternalCheckout={() => setExternalPayPalProduct(null)}
+          />
+        )}
+
+        {/* =====================================================================
             PRIMARY SIMPLE WORKFLOW: AUDIOLIBROS Y VIDEO-LIBROS IA DESDE PDF
-            (HABLADOS CON AVATARES REALES Y ESCENAS DEL TEXTO/TEMA)
            ===================================================================== */}
         {activeModule === 'videobook' && (
           <div className="space-y-8">
-            {/* Simple 3-Step PDF to Spoken Audiobook Creator Card */}
-            <section className="bg-[#11131A] border border-slate-800/90 rounded-md p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800/80 pb-4 mb-5">
+            {/* Overview of Studio Modules with Clear Short Descriptions for Easy Reading & SEO */}
+            <section
+              aria-label="Resumen de módulos del estudio"
+              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
+            >
+              {STUDIO_MODULE_LIST.slice(0, 4).map((mod) => {
+                const isCurrent = activeModule === mod.id;
+                return (
+                  <button
+                    key={mod.id}
+                    type="button"
+                    onClick={() => setActiveModule(mod.id)}
+                    className={`text-left p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                      isCurrent
+                        ? 'bg-indigo-50/70 border-indigo-400 shadow-xs'
+                        : 'bg-white hover:bg-slate-50 border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono font-extrabold uppercase tracking-wider text-indigo-700 bg-indigo-100/80 px-2.5 py-0.5 rounded-md">
+                        {mod.shortLabel}
+                      </span>
+                      <span className="text-[11px] font-bold text-slate-700">
+                        {mod.badgeText}
+                      </span>
+                    </div>
+                    <p className="text-xs sm:text-sm font-semibold text-slate-900 leading-snug">
+                      {mod.shortDescription}
+                    </p>
+                  </button>
+                );
+              })}
+            </section>
+
+            {/* Simple 3-Step PDF to Spoken Audiobook Creator Card — Ultra-Modern Surface */}
+            <section className="bg-white border border-slate-300 rounded-2xl p-6 sm:p-8 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6 mb-6">
                 <div>
-                  <span className="text-xs font-mono uppercase tracking-widest text-amber-400">
-                    ESTUDIO DE AUDIOLIBROS HABLADOS CON IA · DESDE CUALQUIER PDF
+                  <span className="text-xs font-mono font-extrabold uppercase tracking-widest text-indigo-700">
+                    AUDIOLIBROS IA EN VIDEO Y AUDIO · SIN LÍMITE DE TIEMPO
                   </span>
-                  <h1 className="font-display text-2xl sm:text-3xl font-bold text-white mt-0.5">
-                    Crea Audiolibros Completos con Avatares y Escenas desde tu PDF
+                  <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight mt-1">
+                    Convierte cualquier PDF en un Audiolibro Hablado con IA
                   </h1>
-                  <p className="text-xs sm:text-sm text-slate-400 mt-1">
-                    Sube un documento PDF, elige tu Avatar Narrador (o sube una foto real) y el estilo de las escenas del tema para escucharlo completo y descargarlo en MP4 o MP3.
+                  <p className="text-sm sm:text-base font-medium text-slate-800 mt-1">
+                    Sube uno o varios archivos PDF, elige entre los 12 documentos completos por nicho y genera videos MP4 o audios MP3 sin límite de duración.
                   </p>
                 </div>
 
-                {/* Sample PDF Quick Selector */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-mono text-slate-400 mr-1">
-                    PDFs de muestra:
-                  </span>
-                  {SAMPLE_PDF_DOCUMENTS.map((doc) => (
-                    <button
-                      key={doc.filename}
-                      type="button"
-                      onClick={() => {
-                        setTextoPdf(doc.content);
-                        setUploadedPdfName(doc.filename);
-                      }}
-                      className={`text-xs px-2.5 py-1.5 rounded transition-colors cursor-pointer ${
-                        uploadedPdfName === doc.filename
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-medium'
-                          : 'bg-[#171A24] text-slate-300 hover:text-white border border-slate-800'
-                      }`}
-                    >
-                      {doc.label}
-                    </button>
-                  ))}
+                {/* Quick Actions: 1,200 Photos + Folder Toggle + Subscribe */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('niche-gallery')}
+                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-300 flex items-center gap-1.5 font-extrabold transition-all cursor-pointer"
+                  >
+                    <Layers className="w-4 h-4 text-indigo-700" />
+                    <span>Ver las 1,200 Fotos de Nichos</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAudiobookFolder(!showAudiobookFolder)}
+                    className={`text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 font-extrabold border transition-all cursor-pointer ${
+                      showAudiobookFolder
+                        ? 'bg-slate-950 text-white border-slate-950'
+                        : 'bg-white text-slate-900 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>
+                      {showAudiobookFolder
+                        ? `Mi Biblioteca (${savedAudiobooks.length})`
+                        : `Abrir Biblioteca (${savedAudiobooks.length})`}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('paypal-monetization')}
+                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 font-extrabold shadow-xs transition-all cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Suscríbete ahora</span>
+                  </button>
                 </div>
               </div>
 
-              {/* 3 Simple Columns: Paso 1 (PDF) | Paso 2 (Avatar y Escenas) | Paso 3 (Crear Audiolibro) */}
+              {/* 12 Ready-to-Use Niche PDF Documents Selector Bar */}
+              <div className="mb-6 bg-slate-50 border border-slate-300 rounded-2xl p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-indigo-700" />
+                    <span className="text-xs sm:text-sm font-extrabold text-slate-950 uppercase tracking-wider">
+                      Biblioteca de 12 Documentos PDF Completos por Nicho (Haz clic para cargar o descargar)
+                    </span>
+                  </div>
+                  <span className="text-xs font-bold text-slate-700">
+                    Documento activo: <strong className="text-indigo-700">{uploadedPdfName}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                  {SAMPLE_PDF_DOCUMENTS.map((doc) => {
+                    const isSelected = uploadedPdfName === doc.filename;
+                    return (
+                      <div
+                        key={doc.filename}
+                        className={`rounded-xl p-3 border transition-all flex flex-col justify-between gap-2 ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
+                            : 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTextoPdf(doc.content);
+                            setUploadedPdfName(doc.filename);
+                          }}
+                          className="text-left cursor-pointer space-y-1"
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span
+                              className={`text-[11px] font-mono font-extrabold px-2 py-0.5 rounded ${
+                                isSelected
+                                  ? 'bg-white/20 text-white'
+                                  : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
+                              }`}
+                            >
+                              {doc.niche}
+                            </span>
+                            <span
+                              className={`text-[11px] font-mono font-bold ${
+                                isSelected ? 'text-indigo-100' : 'text-slate-600'
+                              }`}
+                            >
+                              {doc.pagesCount} págs
+                            </span>
+                          </div>
+                          <div
+                            className={`text-xs sm:text-sm font-extrabold leading-snug ${
+                              isSelected ? 'text-white' : 'text-slate-950'
+                            }`}
+                          >
+                            {doc.label}
+                          </div>
+                        </button>
+
+                        <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-current/10">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTextoPdf(doc.content);
+                              setUploadedPdfName(doc.filename);
+                            }}
+                            className={`text-xs font-extrabold px-2.5 py-1 rounded-lg cursor-pointer ${
+                              isSelected
+                                ? 'bg-white text-indigo-950'
+                                : 'bg-slate-900 text-white hover:bg-indigo-600'
+                            }`}
+                          >
+                            {isSelected ? '✓ Cargado' : 'Usar este PDF'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const blob = new Blob([doc.content], {
+                                type: 'text/plain;charset=utf-8',
+                              });
+                              const url = URL.createObjectURL(blob);
+                              triggerDownloadUrl(url, doc.filename.replace(/\.pdf$/i, '.txt'));
+                              setTimeout(() => URL.revokeObjectURL(url), 5000);
+                            }}
+                            className={`text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-700 text-white hover:bg-indigo-800'
+                                : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                            }`}
+                            title="Descargar texto del documento"
+                          >
+                            <Download className="w-3 h-3" />
+                            <span>Bajar</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3 Simple Columns: Paso 1 (PDF) | Paso 2 (Avatar, Duración Sin Límite y Escenas) | Paso 3 (Crear y Suscribirse) */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-                {/* PASO 1: Subir PDF o Texto */}
-                <div className="lg:col-span-5 bg-[#0B0D13] border border-slate-800/90 rounded-md p-4 flex flex-col justify-between gap-3">
-                  <div className="space-y-2.5">
+                {/* PASO 1: Subir PDF o Texto (Soporta múltiples PDFs) */}
+                <div className="lg:col-span-5 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
+                  <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">
-                        PASO 1 · SUBE EL PDF DE TU LIBRO O TEMA
+                      <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider">
+                        01 · Subir 1 o Varios PDFs / Texto
                       </span>
-                      <span className="text-[11px] font-mono text-slate-400">
+                      <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
                         {pdfWordCount} palabras
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between gap-3 p-3 rounded bg-[#121620] border border-dashed border-amber-500/40">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <FileText className="w-5 h-5 text-amber-400 shrink-0" />
+                    <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-white border border-slate-300 shadow-2xs">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center shrink-0">
+                          <FileText className="w-5 h-5" />
+                        </div>
                         <div className="truncate">
-                          <div className="text-xs font-semibold text-slate-100 truncate">
+                          <div className="text-sm font-extrabold text-slate-950 truncate">
                             {isExtractingPdf
                               ? 'Extrayendo texto del PDF...'
-                              : uploadedPdfName || 'Selecciona un archivo PDF'}
+                              : uploadedPdfName || 'Selecciona uno o varios PDFs'}
                           </div>
-                          <div className="text-[11px] text-slate-400">
-                            Extrae automáticamente capítulos e ideas del PDF
+                          <div className="text-xs font-semibold text-slate-700">
+                            Soporta múltiples archivos .PDF, .TXT y .MD sin límite
                           </div>
                         </div>
                       </div>
 
-                      <label className="px-3.5 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer shrink-0">
+                      <label className="px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-indigo-600 text-white font-extrabold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0">
                         {isExtractingPdf ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <Loader2 className="w-4 h-4 animate-spin" />
                         ) : (
-                          <FileUp className="w-3.5 h-3.5" />
+                          <FileUp className="w-4 h-4" />
                         )}
-                        <span>Subir PDF</span>
+                        <span>Subir PDF(s)</span>
                         <input
                           type="file"
+                          multiple
                           accept=".pdf,.txt,.md,application/pdf,text/plain"
                           onChange={handlePdfFileUpload}
                           className="hidden"
@@ -1679,29 +2481,41 @@ ${textoPdf || '{{texto_pdf}}'}
                       </label>
                     </div>
 
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-xs font-bold text-slate-800">
+                        Escribe, pega o dicta tus ideas con el micrófono:
+                      </span>
+                      <VoiceDictationButton
+                        currentValue={textoPdf}
+                        onChangeText={setTextoPdf}
+                        variant="light"
+                        label="Dictar por voz"
+                      />
+                    </div>
+
                     <textarea
-                      rows={3}
+                      rows={4}
                       value={textoPdf}
                       onChange={(e) => setTextoPdf(e.target.value)}
-                      placeholder="Aquí aparece el contenido extraído de tu PDF (también puedes escribir o pegar cualquier texto para tu audiolibro)..."
-                      className="w-full rounded bg-[#11141E] border border-slate-800 p-2.5 text-xs text-slate-200 leading-relaxed focus:outline-none focus:border-amber-500"
+                      placeholder="Aquí aparece el contenido extraído de tu PDF (también puedes escribir, pegar o dictar con el micrófono cualquier texto sin límite de extensión)..."
+                      className="w-full rounded-xl bg-white border border-slate-300 p-3.5 text-sm font-medium text-slate-950 leading-relaxed focus:outline-none focus:border-indigo-600"
                     />
                   </div>
                 </div>
 
-                {/* PASO 2: 30 Avatares Reales IA y Estilo de Escenas del Tema */}
-                <div className="lg:col-span-4 bg-[#0B0D13] border border-slate-800/90 rounded-md p-4 flex flex-col justify-between gap-3">
+                {/* PASO 2: 30 Avatares Reales IA + Duración Sin Límite + Capítulos */}
+                <div className="lg:col-span-4 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">
-                        PASO 2 · 30 AVATARES REALES IA
+                      <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider">
+                        02 · Avatar Real & Duración Sin Límite
                       </span>
-                      <span className="text-[10px] font-mono text-emerald-400">
-                        Gemini 3.1 Live
+                      <span className="text-xs font-mono font-extrabold text-indigo-700">
+                        30 Voces IA
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-300">
                       <img
                         src={
                           customAvatarUrl ||
@@ -1710,11 +2524,11 @@ ${textoPdf || '{{texto_pdf}}'}
                         }
                         alt={selectedAvatar.name}
                         referrerPolicy="no-referrer"
-                        className="w-11 h-11 rounded object-cover border border-amber-500/70 shrink-0 bg-slate-900"
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0 bg-slate-900"
                       />
                       <div className="flex-1 min-w-0 space-y-1">
-                        <label className="text-[11px] font-medium text-slate-300 block truncate">
-                          Elige entre los 30 Avatares Reales ({selectedAvatar.accent})
+                        <label className="text-xs font-extrabold text-slate-800 block truncate">
+                          Narrador ({selectedAvatar.accent})
                         </label>
                         <select
                           value={selectedAvatar.id}
@@ -1729,25 +2543,59 @@ ${textoPdf || '{{texto_pdf}}'}
                               setVoiceGender(found.gender);
                             }
                           }}
-                          className="w-full rounded bg-[#121620] border border-slate-800 px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                          className="w-full rounded-lg bg-slate-50 border border-slate-300 px-2.5 py-2 text-xs sm:text-sm font-bold text-slate-950 focus:outline-none focus:border-indigo-600"
                         >
                           {NARRATOR_AVATAR_PRESETS.map((av) => (
                             <option key={av.id} value={av.id}>
-                              #{String(av.number).padStart(2, '0')} {av.name} ({av.accent.replace('Español ', '')}) — {av.category} · Voz {av.voiceName}
+                              #{String(av.number).padStart(2, '0')} {av.name} ({av.accent.replace('Español ', '')}) — {av.category}
                             </option>
                           ))}
                         </select>
                       </div>
                     </div>
 
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div className="space-y-1">
+                        <label className="text-xs font-extrabold text-slate-800 block">
+                          Duración del Video
+                        </label>
+                        <select
+                          value={videoDurationMode}
+                          onChange={(e) => setVideoDurationMode(e.target.value)}
+                          className="w-full rounded-xl bg-emerald-50 border border-emerald-300 px-2.5 py-2 text-xs font-extrabold text-emerald-950 focus:outline-none focus:border-emerald-600"
+                        >
+                          <option value="unlimited">∞ Sin Límite de Tiempo</option>
+                          <option value="extended-10m">10+ Minutos Extendido</option>
+                          <option value="extended-30m">30+ Minutos Audiolibro</option>
+                          <option value="standard">Estándar por Capítulo</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-xs font-extrabold text-slate-800 block">
+                          Capítulos Iniciales
+                        </label>
+                        <select
+                          value={targetChaptersCount}
+                          onChange={(e) => setTargetChaptersCount(Number(e.target.value))}
+                          className="w-full rounded-xl bg-white border border-slate-300 px-2.5 py-2 text-xs font-extrabold text-slate-950 focus:outline-none focus:border-indigo-600"
+                        >
+                          <option value={5}>5 Capítulos</option>
+                          <option value={8}>8 Capítulos (Recomendado)</option>
+                          <option value={10}>10 Capítulos</option>
+                          <option value={12}>12 Capítulos Completos</option>
+                        </select>
+                      </div>
+                    </div>
+
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-slate-300 block">
-                        Estilo de las Escenas del Texto y Tema
+                      <label className="text-xs font-extrabold text-slate-800 block">
+                        Estilo Cinematográfico de las Escenas
                       </label>
                       <select
                         value={bookStyle}
                         onChange={(e) => setBookStyle(e.target.value)}
-                        className="w-full rounded bg-[#121620] border border-slate-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                        className="w-full rounded-xl bg-white border border-slate-300 px-3 py-2 text-xs sm:text-sm font-bold text-slate-950 focus:outline-none focus:border-indigo-600"
                       >
                         {BOOK_STYLE_PRESETS.map((st) => (
                           <option key={st} value={st}>
@@ -1758,25 +2606,25 @@ ${textoPdf || '{{texto_pdf}}'}
                     </div>
                   </div>
 
-                  <div className="text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                    <span>30 Rostros Reales + Generador IA 3.1</span>
-                    <span className="text-amber-400 font-mono">MP4 + MP3</span>
+                  <div className="text-xs font-bold text-slate-800 flex items-center justify-between pt-2 border-t border-slate-300">
+                    <span>Videos y Audios Sin Límite de Tiempo</span>
+                    <span className="text-indigo-700 font-mono font-extrabold">MP4 · MP3 · PDF</span>
                   </div>
                 </div>
 
-                {/* PASO 3: Botones de Creación en 1 Clic */}
-                <div className="lg:col-span-3 bg-[#0B0D13] border border-slate-800/90 rounded-md p-4 flex flex-col justify-between gap-3">
-                  <div className="space-y-2">
-                    <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider block">
-                      PASO 3 · GENERAR AUDIOLIBRO
+                {/* PASO 3: Botones de Creación Modernos + Suscríbete ahora */}
+                <div className="lg:col-span-3 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
+                  <div className="space-y-1">
+                    <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider block">
+                      03 · Producción Sin Límite
                     </span>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      Convierte tu PDF en un audiolibro estructurado por capítulos o genera todo automáticamente con voz IA y escenas del tema.
+                    <p className="text-xs sm:text-sm font-medium text-slate-800 leading-relaxed">
+                      Genera el audiolibro completo con escenas de los 12 nichos en alta definición.
                     </p>
                   </div>
 
                   {videoBookError && (
-                    <div className="p-2.5 rounded bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+                    <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-xs sm:text-sm text-red-900 font-bold">
                       {videoBookError}
                     </div>
                   )}
@@ -1786,17 +2634,17 @@ ${textoPdf || '{{texto_pdf}}'}
                       type="button"
                       onClick={() => handleCreateVideoBookFromPdf(false)}
                       disabled={isGeneratingVideoBook || isGeneratingAllPages}
-                      className="w-full py-2.5 px-4 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                      className="w-full py-3 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
                       {isGeneratingVideoBook ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Adaptando PDF a Audiolibro...</span>
+                          <span>Adaptando PDF Sin Límite...</span>
                         </>
                       ) : (
                         <>
                           <BookOpen className="w-4 h-4" />
-                          <span>Crear Audiolibro desde el PDF</span>
+                          <span>Crear Audiolibro desde PDF</span>
                         </>
                       )}
                     </button>
@@ -1807,19 +2655,203 @@ ${textoPdf || '{{texto_pdf}}'}
                       disabled={
                         isGeneratingVideoBook || isGeneratingAllPages || isGeneratingNarration
                       }
-                      className="w-full py-2.5 px-3 rounded bg-[#161B28] hover:bg-slate-800 border border-amber-500/40 text-amber-300 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                      className="w-full py-3 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Crear Completo (Voz IA + Escenas + Avatar)</span>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Generar Completo (Voz + Video)</span>
+                    </button>
+
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCurrentAudiobookToFolder('MP3')}
+                        disabled={isSavingToFolder !== null}
+                        className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4 text-slate-700" />
+                        <span>Guardar MP3</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveCurrentAudiobookToFolder('MP4')}
+                        disabled={isSavingToFolder !== null}
+                        className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <FolderOpen className="w-4 h-4 text-indigo-700" />
+                        <span>Guardar MP4</span>
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenPayPalForBook(
+                          videoBook.bookTitle,
+                          videoBook.subtitle,
+                          pageImages[0],
+                          videoBook.pages.length
+                        )
+                      }
+                      className="w-full py-2.5 px-3 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                    >
+                      <span>Suscríbete ahora</span>
                     </button>
                   </div>
                 </div>
               </div>
             </section>
 
-            {/* Interactive Spoken Audiobook & Video-eBook Stage with Talking Avatar + Topic Scenes */}
+            {/* Folder Vault for Saving & Downloading Audiobooks in MP3 or MP4 */}
+            {showAudiobookFolder && (
+              <AudiobookFolderVault
+                savedAudiobooks={savedAudiobooks}
+                customFolders={customFolders}
+                onCreateFolder={(newFolderName) => {
+                  if (!customFolders.includes(newFolderName)) {
+                    const next = [...customFolders, newFolderName];
+                    setCustomFolders(next);
+                    saveCustomFoldersToStorage(next);
+                  }
+                }}
+                onSaveCurrentAudiobook={handleSaveCurrentAudiobookToFolder}
+                onRestoreAudiobookToStudio={(item) => {
+                  setVideoBook(item.videoBook);
+                  setPageImages(item.pageImages || {});
+                  setActiveBookPageIdx(0);
+                  setAudiobookVisualMode(item.visualMode || 'avatar-and-scenes');
+                  const foundAv = NARRATOR_AVATAR_PRESETS.find(
+                    (a) => a.id === item.avatarId
+                  );
+                  if (foundAv) {
+                    setSelectedAvatar(foundAv);
+                    setVoiceName(foundAv.voiceName);
+                    setVoiceGender(foundAv.gender);
+                  }
+                  if (item.videoBook.fullNarration) {
+                    setNarrationScript(item.videoBook.fullNarration);
+                  }
+                }}
+                onMoveToFolder={(itemId, newFolder) => {
+                  setSavedAudiobooks((prev) => {
+                    const next = prev.map((it) =>
+                      it.id === itemId ? { ...it, folderName: newFolder } : it
+                    );
+                    saveAudiobooksMetaToStorage(next);
+                    return next;
+                  });
+                }}
+                onToggleFavorite={(itemId) => {
+                  setSavedAudiobooks((prev) => {
+                    const next = prev.map((it) =>
+                      it.id === itemId ? { ...it, isFavorite: !it.isFavorite } : it
+                    );
+                    saveAudiobooksMetaToStorage(next);
+                    return next;
+                  });
+                }}
+                onRenameAudiobook={(itemId, newTitle) => {
+                  setSavedAudiobooks((prev) => {
+                    const next = prev.map((it) =>
+                      it.id === itemId
+                        ? {
+                            ...it,
+                            title: newTitle,
+                            videoBook: { ...it.videoBook, bookTitle: newTitle },
+                          }
+                        : it
+                    );
+                    saveAudiobooksMetaToStorage(next);
+                    return next;
+                  });
+                }}
+                onDeleteAudiobook={(itemId) => {
+                  setSavedAudiobooks((prev) => {
+                    const next = prev.filter((it) => it.id !== itemId);
+                    saveAudiobooksMetaToStorage(next);
+                    return next;
+                  });
+                }}
+                onMarkBlobCached={(itemId, type, sizeLabel) => {
+                  setSavedAudiobooks((prev) => {
+                    const next = prev.map((it) =>
+                      it.id === itemId
+                        ? {
+                            ...it,
+                            hasMp3Blob: type === 'mp3' ? true : it.hasMp3Blob,
+                            hasMp4Blob: type === 'mp4' ? true : it.hasMp4Blob,
+                            fileSizeLabel: sizeLabel || it.fileSizeLabel,
+                          }
+                        : it
+                    );
+                    saveAudiobooksMetaToStorage(next);
+                    return next;
+                  });
+                }}
+                onSellWithPayPal={(item) =>
+                  handleOpenPayPalForBook(
+                    item.title,
+                    item.subtitle,
+                    item.coverImageUrl,
+                    item.chaptersCount
+                  )
+                }
+                currentBookTitle={videoBook.bookTitle}
+                isSavingToFolder={isSavingToFolder}
+                saveProgressPct={saveFolderProgress}
+              />
+            )}
+
+            {/* Interactive Spoken Audiobook & Video-eBook Stage with Talking Avatar + 1,200 Topic Scenes + Unlimited Chapters */}
             <VideoBookPlayer
               videoBook={videoBook}
+              onAddUnlimitedChapter={() => {
+                setVideoBook((prev) => {
+                  const nextNum = prev.pages.length + 1;
+                  const newPage = {
+                    pageNumber: nextNum,
+                    chapterTitle: `Capítulo ${nextNum}: Desarrollo Extendido Sin Límite`,
+                    pageText:
+                      'Este nuevo capítulo amplía la obra sin límite de tiempo, integrando escenas visuales de alta definición y narración sincronizada.',
+                    keyQuote:
+                      'La narrativa sin límite de tiempo permite profundizar en cada idea con claridad cinematográfica.',
+                    imagePrompt:
+                      'Cinematic editorial illustration of an illuminated library and golden horizon, 8k',
+                    durationSec: 15,
+                    primaryHex: '#0D1322',
+                    secondaryHex: '#1B2845',
+                    accentHex: '#F59E0B',
+                  };
+                  const nextPages = [...prev.pages, newPage];
+                  const nextFullNarration = nextPages
+                    .map((p) => `Capítulo ${p.pageNumber}: ${p.chapterTitle}. ${p.pageText}`)
+                    .join(' ');
+                  setNarrationScript(nextFullNarration);
+                  return {
+                    ...prev,
+                    pages: nextPages,
+                    fullNarration: nextFullNarration,
+                    totalEstimatedSec: nextPages.reduce(
+                      (acc, p) => acc + (Number(p.durationSec) || 10),
+                      0
+                    ),
+                  };
+                });
+              }}
+              onUpdateChapterDuration={(pageIdx, newDurationSec) => {
+                setVideoBook((prev) => {
+                  const nextPages = prev.pages.map((p, idx) =>
+                    idx === pageIdx ? { ...p, durationSec: Math.max(4, newDurationSec) } : p
+                  );
+                  return {
+                    ...prev,
+                    pages: nextPages,
+                    totalEstimatedSec: nextPages.reduce(
+                      (acc, p) => acc + (Number(p.durationSec) || 10),
+                      0
+                    ),
+                  };
+                });
+              }}
               pageImages={pageImages}
               generatingPageIdx={generatingPageIdx}
               isGeneratingAllPages={isGeneratingAllPages}
@@ -1858,6 +2890,14 @@ ${textoPdf || '{{texto_pdf}}'}
               }}
               customAvatarUrl={customAvatarUrl}
               onUploadCustomAvatar={(url) => setCustomAvatarUrl(url)}
+              onSellWithPayPal={() =>
+                handleOpenPayPalForBook(
+                  videoBook.bookTitle,
+                  videoBook.subtitle,
+                  pageImages[0],
+                  videoBook.pages.length
+                )
+              }
             />
           </div>
         )}
@@ -1884,14 +2924,22 @@ ${textoPdf || '{{texto_pdf}}'}
               <form onSubmit={handleGeneratePdfProposal} className="flex flex-col gap-4">
                 {/* PDF Upload + Sample Selector + Texto PDF */}
                 <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="text-xs font-medium text-slate-200">
                       Contenido del PDF a adaptar{' '}
                       <span className="font-mono text-amber-400/90">{'{{texto_pdf}}'}</span>
                     </label>
-                    <span className="text-[11px] font-mono text-slate-400 tabular-nums">
-                      {pdfWordCount} palabras
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+                        {pdfWordCount} palabras
+                      </span>
+                      <VoiceDictationButton
+                        currentValue={textoPdf}
+                        onChangeText={setTextoPdf}
+                        variant="dark"
+                        label="Dictar contenido"
+                      />
+                    </div>
                   </div>
 
                   {/* Upload PDF Bar */}
@@ -2678,254 +3726,469 @@ ${textoPdf || '{{texto_pdf}}'}
         )}
 
         {/* =====================================================================
-            MODULE 02: GENERADOR DE GUIONES DE VIDEO DE 2 MINUTOS
+            MODULE 02: GENERADOR DE GUIONES DE VIDEO DE 2 MINUTOS + HISTORIAL
            ===================================================================== */}
         {activeModule === 'script' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-            {/* Left Column: Prompt Formula & Parameters (5 cols) */}
-            <section className="lg:col-span-5 bg-[#111318] border border-white/8 rounded-xl p-6 flex flex-col gap-6">
-              <div className="border-b border-white/8 pb-4">
-                <p className="text-xs text-amber-400 font-medium mb-1">
-                  02. Arquitectura de Guion Audiovisual
-                </p>
-                <h1 className="font-display text-2xl font-bold text-white">
-                  Generador de Guion de 2 Minutos
-                </h1>
-                <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                  Estructura un guion cronometrado de 120 segundos con dirección de cámara, atmósfera sonora y texto listo para locutar.
-                </p>
+          <div className="space-y-8">
+            {/* Top Bar to Toggle 2-Minute Script History Vault */}
+            <div className="flex flex-wrap items-center justify-between gap-4 bg-[#111318] border border-white/8 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <History className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white">
+                    Panel de Historial y Versiones de Guiones de 2 Minutos ({scriptHistory.length} guardados)
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Recupera guiones generados previamente, vuelve a editarlos escena por escena o genera clips MP4 desde versiones anteriores.
+                  </p>
+                </div>
               </div>
 
-              <form onSubmit={handleGenerateScript} className="flex flex-col gap-5">
-                {/* Tema del video */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-medium text-slate-300">
-                    Tema del video <span className="text-slate-500">[tema del video]</span>
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={scriptTopic}
-                    onChange={(e) => setScriptTopic(e.target.value)}
-                    placeholder="Ej. Cómo la biotecnología y la IA están rediseñando la medicina..."
-                    className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
-                  />
-                  <div className="flex flex-wrap gap-1.5 pt-0.5">
-                    {TOPIC_PRESETS.map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setScriptTopic(preset)}
-                        className="text-left text-xs text-slate-400 hover:text-amber-300 bg-[#161922] hover:bg-[#1C202B] px-2.5 py-1 rounded transition-colors cursor-pointer"
-                      >
-                        {preset.length > 44 ? preset.slice(0, 44) + '…' : preset}
-                      </button>
-                    ))}
-                  </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingScript(!isEditingScript)}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    isEditingScript
+                      ? 'bg-emerald-500 text-slate-950'
+                      : 'bg-[#181B22] hover:bg-slate-800 text-amber-300 border border-amber-500/40'
+                  }`}
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>
+                    {isEditingScript
+                      ? 'Modo Edición Activo (Editando Guion)'
+                      : 'Editar Guion Actual'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowScriptHistoryPanel(!showScriptHistoryPanel)}
+                  className="px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>
+                    {showScriptHistoryPanel
+                      ? 'Ocultar Panel de Historial'
+                      : `Ver Historial (${scriptHistory.length})`}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {showScriptHistoryPanel && (
+              <ScriptHistoryVault
+                historyItems={scriptHistory}
+                activeVersionId={activeScriptVersionId}
+                currentScript={generatedScript}
+                currentTopic={scriptTopic}
+                currentTone={scriptTone}
+                currentAudience={scriptAudience}
+                onSaveNewVersion={(notes) =>
+                  handleSaveNewScriptVersion(notes, generatedScript, 'Guardado Manual')
+                }
+                onUpdateActiveVersion={(notes) => handleUpdateActiveScriptVersion(notes)}
+                onRestoreVersion={(item, openEditor) =>
+                  handleRestoreScriptVersion(item, openEditor)
+                }
+                onDuplicateVersion={(item) => handleDuplicateScriptVersion(item)}
+                onDeleteVersion={(id) => {
+                  setScriptHistory((prev) => {
+                    const next = prev.filter((it) => it.id !== id);
+                    saveScriptHistoryToStorage(next);
+                    return next;
+                  });
+                }}
+                onToggleFavoriteVersion={(id) => {
+                  setScriptHistory((prev) => {
+                    const next = prev.map((it) =>
+                      it.id === id ? { ...it, isFavorite: !it.isFavorite } : it
+                    );
+                    saveScriptHistoryToStorage(next);
+                    return next;
+                  });
+                }}
+                onGenerateClipsFromVersion={(item) =>
+                  handleGenerateClipsFromScript(item.script, item.topic)
+                }
+                onSendVersionToNarration={(item) => {
+                  setNarrationScript(item.script.fullNarration);
+                  if (item.script.recommendedVoiceTone) {
+                    setVoiceTone(item.script.recommendedVoiceTone);
+                  }
+                  setActiveModule('narration');
+                }}
+                onConvertVersionToAudiobook={(item) =>
+                  handleConvertScriptVersionToAudiobook(item.script, item.topic)
+                }
+                onExportVersionPdf={(item) =>
+                  exportScriptAsPdf(item.script, {
+                    topic: item.topic,
+                    tone: item.tone,
+                    targetAudience: item.targetAudience,
+                  })
+                }
+                onExportVersionTxt={(item) =>
+                  exportScriptAsTxt(item.script, {
+                    topic: item.topic,
+                    tone: item.tone,
+                    targetAudience: item.targetAudience,
+                  })
+                }
+              />
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              {/* Left Column: Prompt Formula & Parameters (5 cols) */}
+              <section className="lg:col-span-5 bg-[#111318] border border-white/8 rounded-xl p-6 flex flex-col gap-6">
+                <div className="border-b border-white/8 pb-4">
+                  <p className="text-xs text-amber-400 font-medium mb-1">
+                    02. Arquitectura de Guion Audiovisual · Auto-Guardado en Historial
+                  </p>
+                  <h1 className="font-display text-2xl font-bold text-white">
+                    Generador de Guion de 2 Minutos
+                  </h1>
+                  <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
+                    Estructura un guion cronometrado de 120 segundos con dirección de cámara, atmósfera sonora y texto listo para locutar. Cada generación se guarda en tu historial.
+                  </p>
                 </div>
 
-                {/* Tono del video */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-medium text-slate-300">
-                    Tono del video <span className="text-slate-500">[tono del video]</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={scriptTone}
-                    onChange={(e) => setScriptTone(e.target.value)}
-                    placeholder="Ej. cinematográfico, documental, dinámico..."
-                    className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {TONE_PRESETS.map((t) => (
+                <form onSubmit={handleGenerateScript} className="flex flex-col gap-5">
+                  {/* Tema del video */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-300">
+                        Tema del video <span className="text-slate-500">[tema del video]</span>
+                      </label>
+                      <VoiceDictationButton
+                        currentValue={scriptTopic}
+                        onChangeText={setScriptTopic}
+                        variant="dark"
+                        label="Dictar tema"
+                      />
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={scriptTopic}
+                      onChange={(e) => setScriptTopic(e.target.value)}
+                      placeholder="Ej. Cómo la biotecnología y la IA están rediseñando la medicina..."
+                      className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                      {TOPIC_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setScriptTopic(preset)}
+                          className="text-left text-xs text-slate-400 hover:text-amber-300 bg-[#161922] hover:bg-[#1C202B] px-2.5 py-1 rounded transition-colors cursor-pointer"
+                        >
+                          {preset.length > 44 ? preset.slice(0, 44) + '…' : preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tono del video */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-300">
+                        Tono del video <span className="text-slate-500">[tono del video]</span>
+                      </label>
+                      <VoiceDictationButton
+                        currentValue={scriptTone}
+                        onChangeText={setScriptTone}
+                        variant="dark"
+                        label="Dictar tono"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={scriptTone}
+                      onChange={(e) => setScriptTone(e.target.value)}
+                      placeholder="Ej. cinematográfico, documental, dinámico..."
+                      className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {TONE_PRESETS.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setScriptTone(t)}
+                          className={`text-xs px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                            scriptTone === t
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : 'bg-[#161922] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Público objetivo */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <label className="text-xs font-medium text-slate-300">
+                        Público objetivo <span className="text-slate-500">[público objetivo]</span>
+                      </label>
+                      <VoiceDictationButton
+                        currentValue={scriptAudience}
+                        onChangeText={setScriptAudience}
+                        variant="dark"
+                        label="Dictar público"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={scriptAudience}
+                      onChange={(e) => setScriptAudience(e.target.value)}
+                      placeholder="Ej. emprendedores jóvenes, estudiantes de diseño..."
+                      className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {AUDIENCE_PRESETS.map((aud) => (
+                        <button
+                          key={aud}
+                          type="button"
+                          onClick={() => setScriptAudience(aud)}
+                          className={`text-xs px-2.5 py-1 rounded transition-colors cursor-pointer ${
+                            scriptAudience === aud
+                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                              : 'bg-[#161922] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {aud}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Live Prompt Formula Preview Box */}
+                  <div className="bg-[#0A0B0E] border border-white/8 rounded-lg p-4 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-slate-400">
+                        Fórmula de Prompt Estructurado
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!useCustomScriptPrompt) {
+                              setCustomScriptPrompt(builtScriptPrompt);
+                            }
+                            setUseCustomScriptPrompt(!useCustomScriptPrompt);
+                          }}
+                          className="text-xs text-amber-400 hover:underline cursor-pointer"
+                        >
+                          {useCustomScriptPrompt ? 'Usar campos guiados' : 'Editar texto libre'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(builtScriptPrompt, 'script-prompt')}
+                          className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white cursor-pointer"
+                        >
+                          {copiedPromptId === 'script-prompt' ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              Copiado
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5" />
+                              Copiar
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {useCustomScriptPrompt ? (
+                      <textarea
+                        rows={3}
+                        value={customScriptPrompt}
+                        onChange={(e) => setCustomScriptPrompt(e.target.value)}
+                        className="w-full bg-[#111318] border border-white/10 rounded p-2.5 text-xs text-amber-100 font-mono focus:outline-none focus:border-amber-500"
+                      />
+                    ) : (
+                      <p className="text-xs text-slate-300 font-mono leading-relaxed">
+                        “Genera un guion de video de 2 minutos sobre{' '}
+                        <span className="text-amber-300 font-medium">{scriptTopic || '...'}</span>. El
+                        tono debe ser{' '}
+                        <span className="text-amber-300 font-medium">{scriptTone || '...'}</span> y el
+                        público objetivo son{' '}
+                        <span className="text-amber-300 font-medium">{scriptAudience || '...'}</span>.”
+                      </p>
+                    )}
+                  </div>
+
+                  {scriptError && (
+                    <div className="p-3.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-start gap-2.5">
+                      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                      <span>{scriptError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={isGeneratingScript}
+                    className="w-full py-3 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {isGeneratingScript ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Estructurando escaleta de 2 minutos con IA…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4" />
+                        Generar Nuevo Guion de 2 Minutos (y Guardar en Historial)
+                      </>
+                    )}
+                  </button>
+                </form>
+              </section>
+
+              {/* Right Column: Generated & Editable 2-Minute Script Breakdown (7 cols) */}
+              <section className="lg:col-span-7 flex flex-col gap-6">
+                {/* Script Master Header */}
+                <div className="bg-[#111318] border border-white/8 rounded-xl p-6 flex flex-col gap-4">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex-1 min-w-[260px]">
+                      <div className="flex items-center gap-2 text-xs text-slate-400 font-mono tabular-nums mb-1">
+                        <span>DURACIÓN OBJETIVO: {generatedScript.totalDuration}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{generatedScript.scenes.length} ESCENAS</span>
+                        <span aria-hidden="true">·</span>
+                        <span>VOZ SUGERIDA: {generatedScript.recommendedVoiceGender.toUpperCase()}</span>
+                      </div>
+
+                      {isEditingScript ? (
+                        <div className="space-y-2 mt-2">
+                          <label className="text-[11px] font-mono text-amber-400 block">
+                            TÍTULO DEL GUION DE 2 MINUTOS:
+                          </label>
+                          <input
+                            type="text"
+                            value={generatedScript.title}
+                            onChange={(e) =>
+                              setGeneratedScript((prev) => ({
+                                ...prev,
+                                title: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded-lg bg-[#0A0B0E] border border-amber-500/50 px-3 py-2 text-base font-bold text-white focus:outline-none"
+                          />
+                          <label className="text-[11px] font-mono text-amber-400 block">
+                            LOGLINE / SINOPSIS:
+                          </label>
+                          <textarea
+                            rows={2}
+                            value={generatedScript.logline}
+                            onChange={(e) =>
+                              setGeneratedScript((prev) => ({
+                                ...prev,
+                                logline: e.target.value,
+                              }))
+                            }
+                            className="w-full rounded-lg bg-[#0A0B0E] border border-white/15 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <h2 className="font-display text-2xl font-bold text-white">
+                            {generatedScript.title}
+                          </h2>
+                          <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                            {generatedScript.logline}
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <button
-                        key={t}
                         type="button"
-                        onClick={() => setScriptTone(t)}
-                        className={`text-xs px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          scriptTone === t
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : 'bg-[#161922] text-slate-400 hover:text-white'
+                        onClick={() => setIsEditingScript(!isEditingScript)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                          isEditingScript
+                            ? 'bg-emerald-500 text-slate-950'
+                            : 'bg-[#181B22] hover:bg-[#222631] text-amber-300 border border-amber-500/40'
                         }`}
                       >
-                        {t}
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>{isEditingScript ? 'Terminar Edición' : 'Editar Guion'}</span>
                       </button>
-                    ))}
-                  </div>
-                </div>
 
-                {/* Público objetivo */}
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-medium text-slate-300">
-                    Público objetivo <span className="text-slate-500">[público objetivo]</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={scriptAudience}
-                    onChange={(e) => setScriptAudience(e.target.value)}
-                    placeholder="Ej. emprendedores jóvenes, estudiantes de diseño..."
-                    className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 px-3.5 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {AUDIENCE_PRESETS.map((aud) => (
                       <button
-                        key={aud}
                         type="button"
-                        onClick={() => setScriptAudience(aud)}
-                        className={`text-xs px-2.5 py-1 rounded transition-colors cursor-pointer ${
-                          scriptAudience === aud
-                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                            : 'bg-[#161922] text-slate-400 hover:text-white'
-                        }`}
+                        onClick={() =>
+                          handleSaveNewScriptVersion(
+                            'Versión editada manualmente',
+                            generatedScript,
+                            'Editado'
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#181B22] hover:bg-[#222631] text-emerald-300 border border-emerald-500/35 text-xs font-semibold transition-colors cursor-pointer"
+                        title="Guardar este guion como nueva versión en el historial"
                       >
-                        {aud}
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Guardar en Historial</span>
                       </button>
-                    ))}
-                  </div>
-                </div>
 
-                {/* Live Prompt Formula Preview Box */}
-                <div className="bg-[#0A0B0E] border border-white/8 rounded-lg p-4 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-400">
-                      Fórmula de Prompt Estructurado
-                    </span>
-                    <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => {
-                          if (!useCustomScriptPrompt) {
-                            setCustomScriptPrompt(builtScriptPrompt);
-                          }
-                          setUseCustomScriptPrompt(!useCustomScriptPrompt);
-                        }}
-                        className="text-xs text-amber-400 hover:underline cursor-pointer"
+                        onClick={handleExportPdf}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#181B22] hover:bg-[#222631] text-slate-200 hover:text-amber-300 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
                       >
-                        {useCustomScriptPrompt ? 'Usar campos guiados' : 'Editar texto libre'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => copyToClipboard(builtScriptPrompt, 'script-prompt')}
-                        className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white cursor-pointer"
-                      >
-                        {copiedPromptId === 'script-prompt' ? (
+                        {exportedFormat === 'pdf' ? (
                           <>
                             <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            Copiado
+                            PDF
                           </>
                         ) : (
                           <>
-                            <Copy className="w-3.5 h-3.5" />
-                            Copiar
+                            <FileDown className="w-3.5 h-3.5 text-amber-400" />
+                            PDF
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleExportTxt}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#181B22] hover:bg-[#222631] text-slate-200 hover:text-amber-300 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+                      >
+                        {exportedFormat === 'txt' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            TXT
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-3.5 h-3.5 text-amber-400" />
+                            TXT
                           </>
                         )}
                       </button>
                     </div>
                   </div>
 
-                  {useCustomScriptPrompt ? (
-                    <textarea
-                      rows={3}
-                      value={customScriptPrompt}
-                      onChange={(e) => setCustomScriptPrompt(e.target.value)}
-                      className="w-full bg-[#111318] border border-white/10 rounded p-2.5 text-xs text-amber-100 font-mono focus:outline-none focus:border-amber-500"
-                    />
-                  ) : (
-                    <p className="text-xs text-slate-300 font-mono leading-relaxed">
-                      “Genera un guion de video de 2 minutos sobre{' '}
-                      <span className="text-amber-300 font-medium">{scriptTopic || '...'}</span>. El
-                      tono debe ser{' '}
-                      <span className="text-amber-300 font-medium">{scriptTone || '...'}</span> y el
-                      público objetivo son{' '}
-                      <span className="text-amber-300 font-medium">{scriptAudience || '...'}</span>.”
-                    </p>
-                  )}
-                </div>
-
-                {scriptError && (
-                  <div className="p-3.5 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300 flex items-start gap-2.5">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-                    <span>{scriptError}</span>
-                  </div>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={isGeneratingScript}
-                  className="w-full py-3 px-5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-semibold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                >
-                  {isGeneratingScript ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Estructurando escaleta de 2 minutos con IA…
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4" />
-                      Generar Guion de 2 Minutos
-                    </>
-                  )}
-                </button>
-              </form>
-            </section>
-
-            {/* Right Column: Generated 2-Minute Script Breakdown (7 cols) */}
-            <section className="lg:col-span-7 flex flex-col gap-6">
-              {/* Script Master Header */}
-              <div className="bg-[#111318] border border-white/8 rounded-xl p-6 flex flex-col gap-4">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-xs text-slate-400 font-mono tabular-nums mb-1">
-                      <span>DURACIÓN OBJETIVO: {generatedScript.totalDuration}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{generatedScript.scenes.length} ESCENAS</span>
-                      <span aria-hidden="true">·</span>
-                      <span>VOZ SUGERIDA: {generatedScript.recommendedVoiceGender.toUpperCase()}</span>
-                    </div>
-                    <h2 className="font-display text-2xl font-bold text-white">
-                      {generatedScript.title}
-                    </h2>
-                    <p className="text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-                      {generatedScript.logline}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {/* Primary Action Row: Generate Clips from Full Script + Send to Voiceover */}
+                  <div className="flex flex-wrap items-center gap-2.5 pt-2 border-t border-white/8">
                     <button
                       type="button"
-                      onClick={handleExportPdf}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-[#181B22] hover:bg-[#222631] text-slate-200 hover:text-amber-300 border border-white/10 hover:border-amber-500/40 text-xs font-medium transition-colors cursor-pointer"
-                      title="Descargar el guion completo con escaleta técnica en formato PDF (.pdf)"
+                      onClick={() =>
+                        handleGenerateClipsFromScript(generatedScript, scriptTopic)
+                      }
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold transition-colors cursor-pointer"
                     >
-                      {exportedFormat === 'pdf' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          PDF Descargado
-                        </>
-                      ) : (
-                        <>
-                          <FileDown className="w-3.5 h-3.5 text-amber-400" />
-                          Exportar PDF (.pdf)
-                        </>
-                      )}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleExportTxt}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-[#181B22] hover:bg-[#222631] text-slate-200 hover:text-amber-300 border border-white/10 hover:border-amber-500/40 text-xs font-medium transition-colors cursor-pointer"
-                      title="Descargar el guion completo en archivo de texto plano (.txt)"
-                    >
-                      {exportedFormat === 'txt' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          TXT Descargado
-                        </>
-                      ) : (
-                        <>
-                          <FileText className="w-3.5 h-3.5 text-amber-400" />
-                          Exportar Texto (.txt)
-                        </>
-                      )}
+                      <Film className="w-3.5 h-3.5" />
+                      <span>Generar Clips MP4 de Todo este Guion (2 Min)</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
                     </button>
 
                     <button
@@ -2934,120 +4197,334 @@ ${textoPdf || '{{texto_pdf}}'}
                       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 text-xs font-semibold transition-colors cursor-pointer"
                     >
                       <Mic className="w-3.5 h-3.5" />
-                      Enviar a Locución IA
-                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>Enviar a Locución IA</span>
                     </button>
-                  </div>
-                </div>
 
-                {/* Full Continuous Voiceover Preview */}
-                <div className="bg-[#0A0B0E] border border-white/6 rounded-lg p-4">
-                  <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                    <span>Locución Continua (Voiceover Master · 2 Minutos)</span>
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(generatedScript.fullNarration, 'full-vo')}
-                      className="inline-flex items-center gap-1 text-slate-400 hover:text-white cursor-pointer"
+                      onClick={() =>
+                        handleConvertScriptVersionToAudiobook(generatedScript, scriptTopic)
+                      }
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg bg-[#181B22] hover:bg-slate-800 text-slate-200 border border-white/10 text-xs font-medium transition-colors cursor-pointer"
                     >
-                      {copiedPromptId === 'full-vo' ? (
-                        <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          Copiado
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5" />
-                          Copiar locución
-                        </>
-                      )}
+                      <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Abrir como Audiolibro</span>
                     </button>
                   </div>
-                  <p className="text-sm text-slate-200 leading-relaxed">
-                    “{generatedScript.fullNarration}”
-                  </p>
+
+                  {/* Full Continuous Voiceover Preview / Editor */}
+                  <div className="bg-[#0A0B0E] border border-white/6 rounded-lg p-4">
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                      <span>Locución Continua (Voiceover Master · 2 Minutos)</span>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(generatedScript.fullNarration, 'full-vo')}
+                        className="inline-flex items-center gap-1 text-slate-400 hover:text-white cursor-pointer"
+                      >
+                        {copiedPromptId === 'full-vo' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            Copiado
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            Copiar locución
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {isEditingScript ? (
+                      <textarea
+                        rows={4}
+                        value={generatedScript.fullNarration}
+                        onChange={(e) =>
+                          setGeneratedScript((prev) => ({
+                            ...prev,
+                            fullNarration: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded bg-[#111318] border border-amber-500/40 p-2.5 text-sm text-white leading-relaxed focus:outline-none"
+                      />
+                    ) : (
+                      <p className="text-sm text-slate-200 leading-relaxed">
+                        “{generatedScript.fullNarration}”
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* Timecoded Scenes List */}
-              <div className="flex flex-col gap-4">
-                {generatedScript.scenes.map((scene) => (
-                  <article
-                    key={scene.sceneNumber}
-                    className="bg-[#111318] border border-white/8 hover:border-white/15 rounded-xl p-5 transition-colors flex flex-col gap-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/6 pb-3">
-                      <div className="flex items-center gap-3">
-                        <span className="font-mono text-xs font-medium text-amber-400 tabular-nums">
-                          ESCENA 0{scene.sceneNumber}
-                        </span>
-                        <span className="text-slate-600">·</span>
-                        <h3 className="text-base font-semibold text-white">{scene.title}</h3>
-                      </div>
-
-                      <div className="flex items-center gap-2 font-mono text-xs text-slate-400 tabular-nums">
-                        <Clock className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{scene.timecode}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{scene.durationSec}s</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Visual & Camera Column */}
-                      <div className="flex flex-col gap-2">
-                        <div className="text-xs font-medium text-slate-400">
-                          Dirección Visual y Emoción
+                {/* Timecoded Scenes List (with Inline Editing Support) */}
+                <div className="flex flex-col gap-4">
+                  {generatedScript.scenes.map((scene, sceneIdx) => (
+                    <article
+                      key={scene.sceneNumber || sceneIdx}
+                      className="bg-[#111318] border border-white/8 hover:border-white/15 rounded-xl p-5 transition-colors flex flex-col gap-4"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/6 pb-3">
+                        <div className="flex items-center gap-3 flex-1 min-w-[220px]">
+                          <span className="font-mono text-xs font-medium text-amber-400 tabular-nums">
+                            ESCENA 0{scene.sceneNumber}
+                          </span>
+                          <span className="text-slate-600">·</span>
+                          {isEditingScript ? (
+                            <input
+                              type="text"
+                              value={scene.title}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setGeneratedScript((prev) => ({
+                                  ...prev,
+                                  scenes: prev.scenes.map((s, idx) =>
+                                    idx === sceneIdx ? { ...s, title: val } : s
+                                  ),
+                                }));
+                              }}
+                              className="flex-1 rounded bg-[#0A0B0E] border border-amber-500/40 px-2.5 py-1 text-sm font-semibold text-white focus:outline-none"
+                            />
+                          ) : (
+                            <h3 className="text-base font-semibold text-white">
+                              {scene.title}
+                            </h3>
+                          )}
                         </div>
-                        <p className="text-sm text-slate-300 leading-relaxed">
-                          {scene.visualDescription}
-                        </p>
-                        <div className="text-xs text-slate-400 pt-1">
-                          <span className="text-slate-500">Estilo:</span> {scene.visualStyle}
-                          <span className="mx-1.5 text-slate-600">·</span>
-                          <span className="text-slate-500">Cámara:</span> {scene.cameraDirection}
+
+                        <div className="flex items-center gap-2 font-mono text-xs text-slate-400 tabular-nums">
+                          <Clock className="w-3.5 h-3.5 text-slate-500" />
+                          {isEditingScript ? (
+                            <input
+                              type="text"
+                              value={scene.timecode}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setGeneratedScript((prev) => ({
+                                  ...prev,
+                                  scenes: prev.scenes.map((s, idx) =>
+                                    idx === sceneIdx ? { ...s, timecode: val } : s
+                                  ),
+                                }));
+                              }}
+                              className="w-28 rounded bg-[#0A0B0E] border border-white/15 px-2 py-0.5 text-xs text-amber-300 font-mono"
+                            />
+                          ) : (
+                            <span>{scene.timecode}</span>
+                          )}
+                          <span aria-hidden="true">·</span>
+                          <span>{scene.durationSec}s</span>
                         </div>
                       </div>
 
-                      {/* Voiceover & Sound Column */}
-                      <div className="bg-[#0A0B0E] border border-white/6 rounded-lg p-3.5 flex flex-col justify-between gap-3">
-                        <div>
-                          <div className="text-xs font-medium text-amber-400/90 mb-1">
-                            Texto de Narración (Voz en Off)
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Visual & Camera Column */}
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-medium text-slate-400">
+                              Dirección Visual y Emoción
+                            </div>
+                            <VoiceDictationButton
+                              currentValue={scene.visualDescription}
+                              onChangeText={(val) => {
+                                setGeneratedScript((prev) => ({
+                                  ...prev,
+                                  scenes: prev.scenes.map((s, idx) =>
+                                    idx === sceneIdx ? { ...s, visualDescription: val } : s
+                                  ),
+                                }));
+                              }}
+                              variant="dark"
+                              label="Dictar escena"
+                            />
                           </div>
-                          <p className="text-sm text-white leading-relaxed italic">
-                            “{scene.narrationText}”
-                          </p>
+                          {isEditingScript ? (
+                            <div className="space-y-2">
+                              <textarea
+                                rows={3}
+                                value={scene.visualDescription}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setGeneratedScript((prev) => ({
+                                    ...prev,
+                                    scenes: prev.scenes.map((s, idx) =>
+                                      idx === sceneIdx
+                                        ? { ...s, visualDescription: val }
+                                        : s
+                                    ),
+                                  }));
+                                }}
+                                className="w-full rounded bg-[#0A0B0E] border border-white/15 p-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                              />
+                              <input
+                                type="text"
+                                value={scene.cameraDirection}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setGeneratedScript((prev) => ({
+                                    ...prev,
+                                    scenes: prev.scenes.map((s, idx) =>
+                                      idx === sceneIdx
+                                        ? { ...s, cameraDirection: val }
+                                        : s
+                                    ),
+                                  }));
+                                }}
+                                placeholder="Dirección de cámara..."
+                                className="w-full rounded bg-[#0A0B0E] border border-white/15 px-2.5 py-1 text-xs text-slate-300"
+                              />
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-sm text-slate-300 leading-relaxed">
+                                {scene.visualDescription}
+                              </p>
+                              <div className="text-xs text-slate-400 pt-1">
+                                <span className="text-slate-500">Estilo:</span>{' '}
+                                {scene.visualStyle}
+                                <span className="mx-1.5 text-slate-600">·</span>
+                                <span className="text-slate-500">Cámara:</span>{' '}
+                                {scene.cameraDirection}
+                              </div>
+                            </>
+                          )}
                         </div>
-                        <div className="text-xs text-slate-400 border-t border-white/6 pt-2">
-                          <span className="text-slate-500">Diseño Sonoro:</span> {scene.soundDesign}
+
+                        {/* Voiceover & Sound Column */}
+                        <div className="bg-[#0A0B0E] border border-white/6 rounded-lg p-3.5 flex flex-col justify-between gap-3">
+                          <div>
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <div className="text-xs font-medium text-amber-400/90">
+                                Texto de Narración (Voz en Off)
+                              </div>
+                              <VoiceDictationButton
+                                currentValue={scene.narrationText}
+                                onChangeText={(val) => {
+                                  setGeneratedScript((prev) => {
+                                    const nextScenes = prev.scenes.map((s, idx) =>
+                                      idx === sceneIdx ? { ...s, narrationText: val } : s
+                                    );
+                                    return {
+                                      ...prev,
+                                      scenes: nextScenes,
+                                      fullNarration: nextScenes
+                                        .map((s) => s.narrationText)
+                                        .join(' '),
+                                    };
+                                  });
+                                }}
+                                variant="dark"
+                                label="Dictar voz"
+                              />
+                            </div>
+                            {isEditingScript ? (
+                              <textarea
+                                rows={3}
+                                value={scene.narrationText}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setGeneratedScript((prev) => {
+                                    const nextScenes = prev.scenes.map((s, idx) =>
+                                      idx === sceneIdx
+                                        ? { ...s, narrationText: val }
+                                        : s
+                                    );
+                                    return {
+                                      ...prev,
+                                      scenes: nextScenes,
+                                      fullNarration: nextScenes
+                                        .map((s) => s.narrationText)
+                                        .join(' '),
+                                    };
+                                  });
+                                }}
+                                className="w-full rounded bg-[#111318] border border-amber-500/40 p-2 text-xs text-white focus:outline-none"
+                              />
+                            ) : (
+                              <p className="text-sm text-white leading-relaxed italic">
+                                “{scene.narrationText}”
+                              </p>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400 border-t border-white/6 pt-2">
+                            <span className="text-slate-500">Diseño Sonoro:</span>{' '}
+                            {scene.soundDesign}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Scene Pipeline Action Buttons */}
-                    <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
+                      {/* Scene Pipeline Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-end gap-2.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleSendSceneToNarration(scene)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#181B22] text-slate-200 hover:text-amber-300 border border-white/8 hover:border-amber-500/40 transition-colors cursor-pointer"
+                        >
+                          <Mic className="w-3.5 h-3.5 text-amber-400" />
+                          Narrar esta escena (TTS)
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleSendSceneToSequence(scene)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#181B22] text-slate-200 hover:text-amber-300 border border-white/8 hover:border-amber-500/40 transition-colors cursor-pointer"
+                        >
+                          <Film className="w-3.5 h-3.5 text-amber-400" />
+                          Crear clip visual de esta escena
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+
+                  {isEditingScript && (
+                    <div className="flex items-center justify-between gap-3 p-4 rounded-xl bg-[#111318] border border-dashed border-amber-500/40">
                       <button
                         type="button"
-                        onClick={() => handleSendSceneToNarration(scene)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#181B22] text-slate-200 hover:text-amber-300 border border-white/8 hover:border-amber-500/40 transition-colors cursor-pointer"
+                        onClick={() => {
+                          setGeneratedScript((prev) => {
+                            const nextNum = prev.scenes.length + 1;
+                            const newScene: ScriptScene = {
+                              sceneNumber: nextNum,
+                              timecode: '01:45 - 02:00',
+                              durationSec: 15,
+                              title: `Nueva Escena 0${nextNum}`,
+                              visualDescription:
+                                'Plano cinematográfico adicional con iluminación dramática y enfoque selectivo.',
+                              visualStyle: 'Cinematográfico Anamórfico 35mm',
+                              cameraDirection: 'Dolly-in suave hacia el sujeto principal',
+                              narrationText:
+                                'Escribe aquí la línea de locución para esta escena.',
+                              soundDesign: 'Pulso ambiental cálido + transición sutil',
+                            };
+                            return {
+                              ...prev,
+                              scenes: [...prev.scenes, newScene],
+                            };
+                          });
+                        }}
+                        className="px-3.5 py-2 rounded-lg bg-[#181B22] hover:bg-slate-800 border border-amber-500/40 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Mic className="w-3.5 h-3.5 text-amber-400" />
-                        Narrar esta escena (TTS)
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Añadir Nueva Escena al Guion</span>
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => handleSendSceneToSequence(scene)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-[#181B22] text-slate-200 hover:text-amber-300 border border-white/8 hover:border-amber-500/40 transition-colors cursor-pointer"
+                        onClick={() => {
+                          handleSaveNewScriptVersion(
+                            'Escenas editadas manualmente',
+                            generatedScript,
+                            'Editado'
+                          );
+                          setIsEditingScript(false);
+                        }}
+                        className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                       >
-                        <Film className="w-3.5 h-3.5 text-amber-400" />
-                        Crear secuencia visual de escena
+                        <Save className="w-3.5 h-3.5" />
+                        <span>Guardar Cambios como Nueva Versión en Historial</span>
                       </button>
                     </div>
-                  </article>
-                ))}
-              </div>
-            </section>
+                  )}
+                </div>
+              </section>
+            </div>
           </div>
         )}
 
@@ -3076,8 +4553,16 @@ ${textoPdf || '{{texto_pdf}}'}
                   <label className="text-xs font-medium text-slate-300">
                     Guion de video a locutar <span className="text-slate-500">[inserta aquí el guion]</span>
                   </label>
-                  <div className="font-mono text-xs text-slate-400 tabular-nums">
-                    {wordCount} palabras · ~{estimatedSeconds}s estimados
+                  <div className="flex items-center gap-2.5">
+                    <div className="font-mono text-xs text-slate-400 tabular-nums">
+                      {wordCount} palabras · ~{estimatedSeconds}s estimados
+                    </div>
+                    <VoiceDictationButton
+                      currentValue={narrationScript}
+                      onChangeText={setNarrationScript}
+                      variant="dark"
+                      label="Dictar guion"
+                    />
                   </div>
                 </div>
 
@@ -3085,7 +4570,7 @@ ${textoPdf || '{{texto_pdf}}'}
                   rows={5}
                   value={narrationScript}
                   onChange={(e) => setNarrationScript(e.target.value)}
-                  placeholder="Inserta aquí el guion de video para generar la narración..."
+                  placeholder="Inserta aquí el guion de video o usa el botón de micrófono para dictar..."
                   className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 p-3.5 text-sm text-white leading-relaxed placeholder:text-slate-600 focus:outline-none focus:border-amber-500 transition-colors"
                 />
 
@@ -3446,15 +4931,23 @@ ${textoPdf || '{{texto_pdf}}'}
               <form onSubmit={handleGenerateSequencePlan} className="flex flex-col gap-5">
                 {/* Descripción de la escena o emoción */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs font-medium text-slate-300">
-                    Descripción de la escena o emoción{' '}
-                    <span className="text-slate-500">[descripción de la escena o emoción]</span>
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-slate-300">
+                      Descripción de la escena o emoción{' '}
+                      <span className="text-slate-500">[descripción de la escena o emoción]</span>
+                    </label>
+                    <VoiceDictationButton
+                      currentValue={sceneEmotionDesc}
+                      onChangeText={setSceneEmotionDesc}
+                      variant="dark"
+                      label="Dictar escena"
+                    />
+                  </div>
                   <textarea
                     rows={3}
                     value={sceneEmotionDesc}
                     onChange={(e) => setSceneEmotionDesc(e.target.value)}
-                    placeholder="Ej. la sensación de vértigo y libertad al descubrir un océano luminiscente bajo la noche..."
+                    placeholder="Ej. la sensación de vértigo y libertad al descubrir un océano luminiscente bajo la noche (o dicta tu idea con el micrófono)..."
                     className="w-full rounded-lg bg-[#0A0B0E] border border-white/10 p-3 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
                   />
                   <div className="flex flex-wrap gap-1.5">
@@ -3477,10 +4970,18 @@ ${textoPdf || '{{texto_pdf}}'}
 
                 {/* Estilo visual deseado */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-xs font-medium text-slate-300">
-                    Estilo visual deseado{' '}
-                    <span className="text-slate-500">[estilo visual deseado]</span>
-                  </label>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-slate-300">
+                      Estilo visual deseado{' '}
+                      <span className="text-slate-500">[estilo visual deseado]</span>
+                    </label>
+                    <VoiceDictationButton
+                      currentValue={visualStyleDesc}
+                      onChangeText={setVisualStyleDesc}
+                      variant="dark"
+                      label="Dictar estilo"
+                    />
+                  </div>
                   <input
                     type="text"
                     value={visualStyleDesc}
@@ -3730,7 +5231,8 @@ ${textoPdf || '{{texto_pdf}}'}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <div className="text-xs text-slate-400 font-mono tabular-nums">
-                      SECUENCIA MULTICAPA · {sequencePlan.shots.length} PLANOS ·{' '}
+                      SECUENCIA MULTICAPA SIN LÍMITE DE TIEMPO · {sequencePlan.shots.length} PLANOS ·{' '}
+                      {sequencePlan.shots.reduce((acc, s) => acc + (Number(s.durationSec) || 5), 0)}s TOTAL ·{' '}
                       {sequencePlan.bpmTempo || 84} BPM
                     </div>
                     <h2 className="font-display text-xl font-bold text-white mt-0.5">
@@ -3738,8 +5240,47 @@ ${textoPdf || '{{texto_pdf}}'}
                     </h2>
                   </div>
 
-                  <div className="text-xs text-slate-400">
-                    Atmósfera: <span className="text-amber-300">{sequencePlan.ambientEffect}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveModule('niche-gallery')}
+                      className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Elegir de las 1,200 Fotos de Nichos</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSequencePlan((prev) => {
+                          const nextNum = prev.shots.length + 1;
+                          return {
+                            ...prev,
+                            shots: [
+                              ...prev.shots,
+                              {
+                                shotNumber: nextNum,
+                                durationSec: 15,
+                                shotType: `Plano 0${nextNum} Extendido`,
+                                cameraMotion: 'dolly-in',
+                                visualMotif: 'cityscape',
+                                headlineText: `ESCENA 0${nextNum} · SIN LÍMITE`,
+                                actionDescription:
+                                  'Secuencia cinematográfica extendida de alta definición sin límite de tiempo.',
+                                primaryHex: '#0D1322',
+                                secondaryHex: '#1B2845',
+                                accentHex: '#F59E0B',
+                                focalLens: '35mm Anamorphic',
+                              },
+                            ],
+                          };
+                        });
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-extrabold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Añadir Plano Sin Límite</span>
+                    </button>
                   </div>
                 </div>
 
@@ -3785,7 +5326,7 @@ ${textoPdf || '{{texto_pdf}}'}
                 <div className="bg-[#111318] border border-emerald-500/30 rounded-xl p-5 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-white">
-                      Máster de Video Generado (MP4)
+                      Máster de Video Generado Sin Límite (MP4)
                     </h3>
                     <a
                       href={veoVideoUrl}
@@ -3806,7 +5347,7 @@ ${textoPdf || '{{texto_pdf}}'}
                 </div>
               )}
 
-              {/* Multi-Shot Storyboard, Keyframe Images & Color LUT Breakdown */}
+              {/* Multi-Shot Storyboard, Keyframe Images & Unlimited Duration Controls */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {sequencePlan.shots.map((shot, idx) => {
                   const isCurrent = idx === activeShotIndex;
@@ -3823,10 +5364,29 @@ ${textoPdf || '{{texto_pdf}}'}
                     >
                       <div className="flex flex-col gap-2">
                         <div className="flex items-center justify-between text-xs font-mono tabular-nums">
-                          <span className="text-amber-400 font-medium">
+                          <span className="text-amber-400 font-extrabold">
                             PLANO 0{shot.shotNumber} · {shot.durationSec}s
                           </span>
-                          <span className="text-slate-400">{shot.focalLens}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-400 text-[11px]">Duración (s):</span>
+                            <input
+                              type="number"
+                              min={3}
+                              max={3600}
+                              value={shot.durationSec}
+                              onChange={(e) => {
+                                const nextDur = Math.max(3, Number(e.target.value) || 8);
+                                setSequencePlan((prev) => ({
+                                  ...prev,
+                                  shots: prev.shots.map((s, sIdx) =>
+                                    sIdx === idx ? { ...s, durationSec: nextDur } : s
+                                  ),
+                                }));
+                              }}
+                              className="w-16 px-2 py-0.5 rounded bg-white border border-slate-300 text-xs font-mono font-extrabold text-slate-950"
+                              title="Duración libre en segundos sin límite de tiempo"
+                            />
+                          </div>
                         </div>
 
                         {/* Shot Keyframe Image Preview or Placeholder */}
@@ -3893,6 +5453,18 @@ ${textoPdf || '{{texto_pdf}}'}
                               className="hidden"
                             />
                           </label>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveShotIndex(idx);
+                              setActiveModule('niche-gallery');
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-indigo-50 hover:bg-indigo-100 text-xs font-bold text-indigo-950 border border-indigo-200 cursor-pointer"
+                          >
+                            <Layers className="w-3 h-3 text-indigo-700" />
+                            <span>Fotos Nicho</span>
+                          </button>
                         </div>
 
                         <div className="flex items-center justify-between text-xs text-slate-400">
@@ -3938,6 +5510,17 @@ ${textoPdf || '{{texto_pdf}}'}
           handleGenerateNarration(proposal.fullVoiceoverScript);
         }}
         isSynthesizingVoiceover={isGeneratingNarration}
+      />
+
+      {/* Administrator Account & Control Center Modal */}
+      <AdminControlModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        session={adminSession}
+        onLoginSuccess={handleAdminLoginSuccess}
+        onLogout={handleAdminLogout}
+        savedAudiobooksCount={savedAudiobooks.length}
+        scriptHistoryCount={scriptHistory.length}
       />
 
       {/* Quiet Studio Footer */}

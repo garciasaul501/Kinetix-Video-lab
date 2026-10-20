@@ -9,15 +9,18 @@
 
   body {
     font-family: var(--font-sans);
-    background-color: #0A0B0E;
-    color: #F3F4F6;
+    background-color: #F8FAFC;
+    color: #0F172A;
+    font-size: 15px;
+    line-height: 1.6;
     letter-spacing: 0.01em;
     overflow-x: hidden;
   }
 
-  h1, h2, .font-display {
+  h1, h2, h3, h4, .font-display {
     font-family: var(--font-display);
     text-wrap: balance;
+    color: #0F172A;
   }
 
   .font-mono, .tabular-nums {
@@ -26,22 +29,253 @@
   }
 }
 
-/* Custom studio scrollbar */
+/* ============================================================================
+   HIGH-LEGIBILITY MODERN WHITE EDITORIAL STUDIO THEME
+   Ensures crystal-clear word contrast (WCAG AAA) across all studio panels
+   ============================================================================ */
+
+/* Studio Surfaces -> Crisp White & Light Alabaster */
+.bg-\[\#0A0B0E\],
+.bg-\[\#0A0B0E\]\/95,
+.bg-\[\#0D1017\],
+.bg-\[\#0E1118\],
+.bg-\[\#11131A\],
+.bg-\[\#111318\],
+.bg-\[\#11141D\],
+.bg-\[\#090B10\],
+.bg-\[\#10131B\] {
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+}
+
+.bg-\[\#0B0D13\],
+.bg-\[\#0B0E15\],
+.bg-\[\#0C0E14\],
+.bg-\[\#0F1219\],
+.bg-\[\#11141E\],
+.bg-\[\#12151E\],
+.bg-\[\#121620\],
+.bg-\[\#131722\],
+.bg-\[\#141720\],
+.bg-\[\#141824\],
+.bg-\[\#151821\],
+.bg-\[\#151822\],
+.bg-\[\#151924\],
+.bg-\[\#151925\],
+.bg-\[\#161922\],
+.bg-\[\#161923\],
+.bg-\[\#161A24\],
+.bg-\[\#161A26\],
+.bg-\[\#161B28\],
+.bg-\[\#162032\],
+.bg-\[\#171A24\],
+.bg-\[\#171B26\],
+.bg-\[\#181B22\],
+.bg-\[\#181C26\],
+.bg-\[\#1A1E29\],
+.bg-\[\#1A1F2E\] {
+  background-color: #F1F5F9 !important;
+  color: #0F172A !important;
+}
+
+/* Fix White/Light Text inside Light-Converted Studio Panels so Every Word is Crystal Clear */
+.bg-\[\#0A0B0E\] .text-white,
+.bg-\[\#0D1017\] .text-white,
+.bg-\[\#11131A\] .text-white,
+.bg-\[\#111318\] .text-white,
+.bg-\[\#11141D\] .text-white,
+.bg-\[\#141720\] .text-white,
+.bg-\[\#161922\] .text-white,
+.bg-\[\#181B22\] .text-white,
+.bg-\[\#181C26\] .text-white,
+.bg-\[\#171A24\] .text-white {
+  color: #0F172A !important;
+}
+
+/* Preserve White Text on Intentionally Dark Solid Buttons & Badges */
+.bg-slate-950,
+.bg-slate-950 .text-white,
+.bg-slate-900,
+.bg-slate-900 .text-white,
+.bg-indigo-600,
+.bg-indigo-600 .text-white,
+.bg-indigo-700,
+.bg-emerald-600,
+.bg-emerald-600 .text-white,
+.bg-rose-600,
+.bg-rose-600 .text-white,
+.bg-\[\#0070BA\],
+.bg-\[\#0070BA\] .text-white,
+.bg-\[\#003087\],
+.bg-\[\#003087\] .text-white,
+.bg-slate-950\/85,
+.bg-slate-950\/90,
+.bg-black\/75,
+.bg-black\/80 {
+  color: #FFFFFF !important;
+}
+
+.bg-slate-950 {
+  background-color: #0F172A !important;
+}
+
+/* High-Contrast Text Overrides on White Studio Canvas */
+.text-\[\#F3F4F6\],
+.text-slate-100,
+.text-slate-200 {
+  color: #0F172A !important;
+}
+
+.text-slate-300 {
+  color: #1E293B !important;
+}
+
+.text-slate-400,
+.text-slate-500 {
+  color: #334155 !important;
+}
+
+.text-amber-100,
+.text-amber-200,
+.text-amber-300,
+.text-amber-400 {
+  color: #B45309 !important;
+  font-weight: 600;
+}
+
+.text-sky-300,
+.text-sky-400 {
+  color: #0369A1 !important;
+  font-weight: 600;
+}
+
+.text-emerald-300,
+.text-emerald-400 {
+  color: #047857 !important;
+  font-weight: 600;
+}
+
+/* Boost Tiny Font Sizes so All Words are Effortless to Read */
+.text-\[9px\],
+.text-\[10px\] {
+  font-size: 0.76rem !important;
+  line-height: 1.35 !important;
+  font-weight: 600;
+}
+
+.text-\[11px\] {
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+}
+
+.text-xs {
+  font-size: 0.85rem !important;
+  line-height: 1.5 !important;
+}
+
+/* Crisp Architectural Borders on White Background */
+.border-white\/6,
+.border-white\/8,
+.border-white\/10,
+.border-white\/15,
+.border-slate-800,
+.border-slate-800\/90,
+.border-slate-800\/80,
+.border-slate-800\/70,
+.border-slate-700,
+.border-slate-700\/80 {
+  border-color: #CBD5E1 !important;
+}
+
+/* Inputs, Selects & Textareas on White Background */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+  border-color: #94A3B8 !important;
+  font-weight: 500;
+  font-size: 0.925rem !important;
+  line-height: 1.55 !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #64748B !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #4F46E5 !important;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16) !important;
+}
+
+/* High-Attention Buttons across the Studio */
+button,
+label.cursor-pointer {
+  transition: all 0.16s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+button:not(:disabled):hover,
+label.cursor-pointer:hover {
+  transform: translateY(-1px);
+}
+
+/* Make amber & emerald soft buttons pop with bold contrast on white */
+.bg-amber-500 {
+  background-color: #F59E0B !important;
+  color: #0F172A !important;
+  border: 1.5px solid #D97706 !important;
+  box-shadow: 0 2px 6px rgba(245, 158, 11, 0.25) !important;
+}
+
+.bg-amber-500:hover {
+  background-color: #D97706 !important;
+  color: #FFFFFF !important;
+}
+
+.bg-amber-500\/20,
+.bg-amber-500\/15,
+.bg-amber-500\/10 {
+  background-color: #FEF3C7 !important;
+  color: #92400E !important;
+  border-color: #F59E0B !important;
+  font-weight: 700 !important;
+}
+
+.bg-sky-500\/15,
+.bg-sky-500\/20 {
+  background-color: #E0F2FE !important;
+  color: #075985 !important;
+  border-color: #38BDF8 !important;
+  font-weight: 700 !important;
+}
+
+.bg-emerald-500\/20,
+.bg-emerald-500\/15,
+.bg-emerald-500\/10 {
+  background-color: #D1FAE5 !important;
+  color: #065F46 !important;
+  border-color: #10B981 !important;
+  font-weight: 700 !important;
+}
+
+/* Custom studio scrollbar in Light Mode */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0A0B0E;
+  background: #F1F5F9;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #222631;
-  border-radius: 3px;
+  background: #94A3B8;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #353B4B;
+  background: #64748B;
 }
-

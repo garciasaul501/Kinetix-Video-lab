@@ -10,7 +10,6 @@ import zlib from 'zlib';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type, GenerateVideosOperation } from '@google/genai';
 
 const execFileAsync = promisify(execFile);
@@ -703,7 +702,7 @@ function buildFallbackVideoBook(
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
 
@@ -1888,7 +1887,14 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
   });
 
   // Vite middleware for development or static serving for production
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(__dirname, 'dist');
+  const isRunningCompiledJs = process.argv[1] ? process.argv[1].endsWith('server.js') : false;
+  const shouldServeStatic =
+    process.env.NODE_ENV === 'production' ||
+    (isRunningCompiledJs && fs.existsSync(path.join(distPath, 'index.html')));
+
+  if (!shouldServeStatic) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -1899,7 +1905,6 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

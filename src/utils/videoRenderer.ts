@@ -141,6 +141,7 @@ export async function renderVideoBookToMp4Url(
     mode?: AudiobookVisualMode;
     avatar?: NarratorAvatarPreset;
     customAvatarUrl?: string;
+    goldTypography?: boolean;
   }
 ): Promise<string> {
   const width = 1280;
@@ -404,8 +405,17 @@ export async function renderVideoBookToMp4Url(
       ctx.lineTo(rightX + halfW - padX, bookY + 56);
       ctx.stroke();
 
-      // Chapter Title
-      ctx.fillStyle = '#F9FAFB';
+      // Chapter Title in Modern 24K Gold Letters
+      if (visualOptions?.goldTypography !== false) {
+        const titleGrad = ctx.createLinearGradient(textStartX, 0, textStartX + 320, 0);
+        titleGrad.addColorStop(0, '#FFFBEB');
+        titleGrad.addColorStop(0.3, '#FDE68A');
+        titleGrad.addColorStop(0.7, '#F59E0B');
+        titleGrad.addColorStop(1, '#D97706');
+        ctx.fillStyle = titleGrad;
+      } else {
+        ctx.fillStyle = '#F9FAFB';
+      }
       ctx.font = '700 24px "Syne", sans-serif';
       const titleLines = wrapCanvasLines(
         ctx,
@@ -421,7 +431,7 @@ export async function renderVideoBookToMp4Url(
 
       cursorY += 12;
 
-      // Main Page Body Text (with synchronized spoken highlight bar)
+      // Main Page Body Text (with synchronized spoken highlight bar in gold)
       ctx.font = '400 16.5px "Plus Jakarta Sans", sans-serif';
       const bodyLines = wrapCanvasLines(ctx, page?.pageText || '', maxTextW, 9);
       const activeLineIdx = Math.min(
@@ -431,17 +441,47 @@ export async function renderVideoBookToMp4Url(
 
       bodyLines.forEach((bLine, lIdx) => {
         if (lIdx === activeLineIdx) {
-          ctx.fillStyle = `rgba(${ra}, ${ga}, ${ba}, 0.16)`;
+          ctx.fillStyle = visualOptions?.goldTypography !== false ? 'rgba(245, 158, 11, 0.25)' : `rgba(${ra}, ${ga}, ${ba}, 0.16)`;
           ctx.fillRect(textStartX - 8, cursorY - 19, maxTextW + 16, 26);
-          ctx.fillStyle = '#FFFFFF';
+          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#FFFBEB' : '#FFFFFF';
         } else if (lIdx < activeLineIdx) {
-          ctx.fillStyle = '#D1D5DB';
+          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#FDE68A' : '#D1D5DB';
         } else {
-          ctx.fillStyle = '#9CA3AF';
+          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#F59E0B' : '#9CA3AF';
         }
         ctx.fillText(bLine, textStartX, cursorY);
         cursorY += 28;
       });
+
+      // Futuristic Gold Logo Watermark Badge
+      ctx.save();
+      const wmX = width - 215;
+      const wmY = 16;
+      ctx.fillStyle = 'rgba(10, 12, 18, 0.88)';
+      ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.roundRect(wmX, wmY, 198, 34, 10);
+      ctx.fill();
+      ctx.stroke();
+
+      // Golden diamond core
+      ctx.fillStyle = '#F59E0B';
+      ctx.beginPath();
+      ctx.moveTo(wmX + 18, wmY + 10);
+      ctx.lineTo(wmX + 24, wmY + 17);
+      ctx.lineTo(wmX + 18, wmY + 24);
+      ctx.lineTo(wmX + 12, wmY + 17);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#FFF6CC';
+      ctx.font = '900 11.5px "Syne", sans-serif';
+      ctx.fillText('KINETIX', wmX + 30, wmY + 21);
+      ctx.fillStyle = '#FBBF24';
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.fillText('AI 2050 · ORO', wmX + 88, wmY + 21);
+      ctx.restore();
 
       // Key Quote Callout Box at bottom of Right Page
       if (page?.keyQuote) {

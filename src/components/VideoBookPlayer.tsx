@@ -45,6 +45,7 @@ import {
   matchBestScenesForBookPages,
 } from '../utils/nicheSceneLibrary';
 import { NicheSceneGalleryView } from './NicheSceneGalleryView';
+import { FuturisticGoldLogo } from './FuturisticGoldLogo';
 
 interface VideoBookPlayerProps {
   videoBook: VideoBook;
@@ -835,24 +836,23 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
       <div className="bg-[#11131A] border border-slate-800/90 rounded-md p-4 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-md bg-amber-500/15 border border-amber-500/35 flex items-center justify-center text-amber-400">
-              <Headphones className="w-5 h-5" />
-            </div>
+            <FuturisticGoldLogo size="sm" showWordmark={false} />
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-semibold">
-                  AUDIOLIBRO IA COMPLETO EN VIDEO ({pages.length} CAPÍTULOS)
+                <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-extrabold flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  MODELO FUTURISTA · {pages.length} CAPÍTULOS
                 </span>
                 <span className="text-xs font-mono text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-emerald-400">
+                <span className="text-[11px] font-mono text-amber-300 font-bold">
                   Avatar #{selectedAvatar.number}: {selectedAvatar.name} ({selectedAvatar.voiceName})
                 </span>
                 <span className="text-xs font-mono text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-slate-400">
-                  {illustratedCount}/{pages.length} escenas activas
+                <span className="text-[11px] font-mono text-amber-200/90">
+                  {illustratedCount}/{pages.length} escenas en oro
                 </span>
               </div>
-              <h2 className="font-display text-lg sm:text-xl font-bold text-slate-100 leading-tight">
+              <h2 className="font-display text-lg sm:text-2xl font-black bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent leading-tight drop-shadow-[0_2px_8px_rgba(245,158,11,0.25)]">
                 {videoBook.bookTitle}
               </h2>
             </div>

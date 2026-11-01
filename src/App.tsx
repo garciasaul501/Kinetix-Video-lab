@@ -97,6 +97,10 @@ import {
   STUDIO_PDF_LIBRARY_12,
   StudioModuleId,
 } from './utils/seoMetadata';
+import {
+  FuturisticGoldLogo,
+  FuturisticLogoModal,
+} from './components/FuturisticGoldLogo';
 
 type ActiveModule = StudioModuleId;
 
@@ -1949,6 +1953,16 @@ ${textoPdf || '{{texto_pdf}}'}
 
   // Administrator Account Session (garciasaul501@gmail.com / Garciasaul@501)
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [isViralLogoModalOpen, setIsViralLogoModalOpen] = useState(false);
+  const [isGoldModel, setIsGoldModel] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('kinetix_gold_model_mode');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
   const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
     try {
       const saved = localStorage.getItem('kinetix_admin_session_v1');
@@ -1992,22 +2006,20 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   return (
-    <div className="min-h-screen bg-[#FAFAFC] text-slate-900 flex flex-col selection:bg-indigo-600 selection:text-white">
+    <div
+      className={`min-h-screen flex flex-col transition-colors duration-300 selection:bg-amber-500 selection:text-black ${
+        isGoldModel ? 'theme-gold-futuristic' : 'bg-[#FAFAFC] text-slate-900'
+      }`}
+    >
       {/* Ultra-Modern Minimalist Glass Header */}
-      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-xl border-b border-slate-200/80">
+      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-xl border-b border-slate-200/80 transition-all">
         <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-slate-950 flex items-center justify-center text-white font-bold shrink-0 shadow-sm">
-              <BookOpen className="w-4 h-4 stroke-[2.2]" />
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-display text-lg font-extrabold tracking-tight text-slate-950">
-                Kinetix Studio
-              </span>
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded-md bg-slate-100 text-[11px] font-semibold text-slate-600 border border-slate-200/80">
-                Audiolibros & Video IA
-              </span>
-            </div>
+            <FuturisticGoldLogo
+              size="sm"
+              showWordmark={true}
+              onClick={() => setIsViralLogoModalOpen(true)}
+            />
           </div>
 
           {/* Ultra-Modern Segmented Navigation with Clear Readable Typography */}
@@ -2091,12 +2103,50 @@ ${textoPdf || '{{texto_pdf}}'}
             </button>
           </nav>
 
-          {/* Clean, Modern "Suscríbete ahora" CTA Button + Admin Account Button */}
-          <div className="flex items-center gap-2.5">
+          {/* Futuristic Gold Model Toggle, Viral Logo Button & Clean CTAs */}
+          <div className="flex items-center gap-2">
+            {/* Modelo Moderno con Letras Color Oro Toggle */}
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isGoldModel;
+                setIsGoldModel(next);
+                try {
+                  localStorage.setItem('kinetix_gold_model_mode', String(next));
+                } catch {
+                  // ignore
+                }
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all cursor-pointer shadow-sm ${
+                isGoldModel
+                  ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/15 to-amber-600/20 text-amber-300 border-amber-400/50 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
+                  : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
+              }`}
+              title="Activar / Desactivar Modelo Moderno con Letras Color Oro"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              <span className="hidden sm:inline">
+                {isGoldModel ? '👑 Letras Oro: ON' : 'Letras Oro: OFF'}
+              </span>
+              <span className="sm:hidden">Oro {isGoldModel ? 'ON' : 'OFF'}</span>
+            </button>
+
+            {/* Logotipo Futurista Viral Modal Launcher */}
+            <button
+              type="button"
+              onClick={() => setIsViralLogoModalOpen(true)}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_14px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
+              title="Ver y descargar el nuevo Logotipo Futurista Viral en SVG y PNG 4K"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Logotipo Viral 2050</span>
+              <span className="md:hidden">Logo 2050</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setIsAdminModalOpen(true)}
-              className={`px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-2 border transition-all cursor-pointer ${
+              className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-2 border transition-all cursor-pointer ${
                 adminSession
                   ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border-emerald-300'
                   : 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
@@ -2112,16 +2162,16 @@ ${textoPdf || '{{texto_pdf}}'}
                   adminSession ? 'text-emerald-600' : 'text-slate-700'
                 }`}
               />
-              <span className="hidden md:inline">
+              <span className="hidden xl:inline">
                 {adminSession ? `Admin · ${adminSession.user.email}` : 'Acceso Admin'}
               </span>
-              <span className="md:hidden">Admin</span>
+              <span className="xl:hidden">Admin</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveModule('paypal-monetization')}
-              className="px-4 py-2 rounded-xl bg-slate-950 hover:bg-indigo-600 text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>Suscríbete ahora</span>
@@ -5522,6 +5572,18 @@ ${textoPdf || '{{texto_pdf}}'}
         savedAudiobooksCount={savedAudiobooks.length}
         scriptHistoryCount={scriptHistory.length}
       />
+
+      {/* Hyper-Futuristic Viral Gold Logo Showcase & Export Modal */}
+      {isViralLogoModalOpen && (
+        <FuturisticLogoModal
+          onClose={() => setIsViralLogoModalOpen(false)}
+          copied={false}
+          onCopyBadge={(e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText('KINETIX QUANTUM 2050 · AI VIDEO & AUDIO LAB');
+          }}
+        />
+      )}
 
       {/* Quiet Studio Footer */}
       <footer className="border-t border-white/6 py-4 px-6 mt-12">

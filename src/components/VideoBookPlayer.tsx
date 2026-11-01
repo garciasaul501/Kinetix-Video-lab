@@ -137,6 +137,9 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   const [visibleSceneCount, setVisibleSceneCount] = useState<number>(60);
   const [generatingScenePhotoId, setGeneratingScenePhotoId] = useState<string | null>(null);
 
+  // Portada & Typography Contrast Mode: Negro, Blanco y Neón (Ultra Contraste para máxima legibilidad)
+  const [portadaContrastTheme, setPortadaContrastTheme] = useState<'neon-bw' | 'gold-obsidian' | 'editorial'>('neon-bw');
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
@@ -982,18 +985,82 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Portada & Typography Style: Negro, Blanco y Neón (Ultra Contraste para que resalten las letras más) */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-mono font-bold text-amber-400 mr-1 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              ESTILO DE PORTADA & LETRAS:
+            </span>
+            <button
+              type="button"
+              onClick={() => setPortadaContrastTheme('neon-bw')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black text-white border-2 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)] ring-1 ring-amber-400'
+                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
+              }`}
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_6px_#fbbf24]" />
+              <span>Negro, Blanco y Neón (Ultra Contraste)</span>
+              <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1 rounded">Recomendado</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPortadaContrastTheme('gold-obsidian')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                portadaContrastTheme === 'gold-obsidian'
+                  ? 'bg-[#0B0E17] text-amber-300 border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
+                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
+              }`}
+            >
+              <span>✨ Oro 24K & Obsidiana</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPortadaContrastTheme('editorial')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                portadaContrastTheme === 'editorial'
+                  ? 'bg-white text-slate-900 border-2 border-indigo-600 shadow-xs'
+                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
+              }`}
+            >
+              <span>📄 Clásico Editorial Blanco</span>
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Letras con máxima legibilidad y halo neón activo</span>
+          </div>
+        </div>
       </div>
 
       {/* Main Open Video-Audiobook Stage (Left: Scene & Talking Avatar | Right: Synchronized Spoken Book Text) */}
-      <div className="bg-[#0D1017] border border-slate-800 rounded-md overflow-hidden shadow-2xl">
+      <div
+        className={`rounded-2xl overflow-hidden shadow-2xl relative transition-all duration-300 ${
+          portadaContrastTheme === 'neon-bw'
+            ? 'portada-neon-stage portada-neon-halo border-2 border-amber-400 bg-black'
+            : portadaContrastTheme === 'gold-obsidian'
+            ? 'bg-[#0B0E17] border-2 border-amber-500/80 shadow-[0_0_30px_rgba(245,158,11,0.25)]'
+            : 'bg-white border border-slate-300 shadow-xl'
+        }`}
+      >
         <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[500px]">
           {/* Left Stage: Either Full Talking Avatar OR Topic Scene + PiP Talking Avatar */}
           <div
-            className="lg:col-span-6 relative overflow-hidden border-b lg:border-b-0 lg:border-r border-slate-800/90 flex flex-col justify-between p-6 min-h-[380px]"
+            className={`lg:col-span-6 relative overflow-hidden border-b lg:border-b-0 lg:border-r flex flex-col justify-between p-6 min-h-[380px] ${
+              portadaContrastTheme === 'neon-bw'
+                ? 'border-amber-400/40 bg-black'
+                : 'border-slate-800/90'
+            }`}
             style={{
-              background: `linear-gradient(135deg, ${currentPage.primaryHex || '#0D1322'} 0%, ${
-                currentPage.secondaryHex || '#1B2845'
-              } 100%)`,
+              background:
+                portadaContrastTheme === 'neon-bw'
+                  ? 'radial-gradient(circle at top right, #0F172A 0%, #05070B 60%, #000000 100%)'
+                  : `linear-gradient(135deg, ${currentPage.primaryHex || '#0D1322'} 0%, ${
+                      currentPage.secondaryHex || '#1B2845'
+                    } 100%)`,
             }}
           >
             {visualMode === 'avatar-only' ? (
@@ -1021,7 +1088,13 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                           : 'scale(1.02)',
                       }}
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#080A0F] via-[#080A0F]/25 to-transparent" />
+                    <div
+                      className={`absolute inset-0 ${
+                        portadaContrastTheme === 'neon-bw'
+                          ? 'bg-gradient-to-t from-black via-black/45 to-transparent'
+                          : 'bg-gradient-to-t from-[#080A0F] via-[#080A0F]/25 to-transparent'
+                      }`}
+                    />
                   </div>
                 ) : (
                   <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -1037,7 +1110,13 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
             {/* Top Left Overlay: Chapter Badge & Generate Topic Scene Button */}
             <div className="relative z-10 flex items-center justify-between gap-2">
-              <span className="px-2.5 py-1 rounded bg-slate-950/85 backdrop-blur-md border border-slate-700/80 text-[11px] font-mono font-semibold text-amber-400">
+              <span
+                className={`px-3 py-1.5 rounded-lg backdrop-blur-md text-xs font-mono font-black tracking-widest ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'bg-black/95 text-amber-300 border-2 border-amber-400/90 shadow-[0_0_15px_rgba(251,191,36,0.5)]'
+                    : 'bg-slate-950/85 border border-slate-700/80 text-amber-400 text-[11px]'
+                }`}
+              >
                 CAPÍTULO {currentPage.pageNumber} DE {pages.length}
               </span>
 
@@ -1046,7 +1125,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                   type="button"
                   onClick={() => onGeneratePageImage(activePageIdx)}
                   disabled={generatingPageIdx === activePageIdx || isGeneratingAllPages}
-                  className="px-3 py-1.5 rounded bg-slate-950/85 hover:bg-slate-900 backdrop-blur-md border border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer"
+                  className={`px-3.5 py-1.5 rounded-lg backdrop-blur-md text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'bg-black/95 hover:bg-black border border-amber-400/80 text-white shadow-[0_0_12px_rgba(251,191,36,0.3)] hover:shadow-[0_0_20px_rgba(251,191,36,0.6)]'
+                      : 'bg-slate-950/85 hover:bg-slate-900 border border-slate-700 text-slate-200'
+                  }`}
                 >
                   {generatingPageIdx === activePageIdx ? (
                     <>
@@ -1067,21 +1150,37 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
             {/* Center Prompt Preview if no scene image yet and not in avatar-only mode */}
             {!currentImage && visualMode !== 'avatar-only' && (
-              <div className="relative z-10 my-auto py-6 text-center max-w-md mx-auto space-y-3">
-                <div className="w-11 h-11 rounded-full bg-slate-950/60 border border-slate-700/80 flex items-center justify-center mx-auto text-amber-400">
+              <div
+                className={`relative z-10 my-auto py-6 text-center max-w-md mx-auto space-y-3 p-6 rounded-2xl ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'bg-black/90 border border-amber-400/70 shadow-[0_0_25px_rgba(251,191,36,0.3)]'
+                    : ''
+                }`}
+              >
+                <div className="w-12 h-12 rounded-full bg-black/80 border border-amber-400/80 flex items-center justify-center mx-auto text-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.5)]">
                   <Sparkles className="w-5 h-5" />
                 </div>
-                <p className="font-display text-lg font-bold text-slate-100">
+                <p
+                  className={`font-display text-lg font-black ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]'
+                      : 'text-slate-100'
+                  }`}
+                >
                   Escena del Capítulo: {currentPage.chapterTitle}
                 </p>
-                <p className="text-xs text-slate-300/90 leading-relaxed line-clamp-2 italic">
+                <p
+                  className={`text-xs leading-relaxed line-clamp-2 italic font-medium ${
+                    portadaContrastTheme === 'neon-bw' ? 'text-slate-200' : 'text-slate-300/90'
+                  }`}
+                >
                   “{currentPage.keyQuote}”
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleAutoFillBookFrom1200Library()}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-sky-400 hover:bg-sky-300 text-slate-950 font-black text-xs transition-all shadow-[0_0_12px_rgba(56,189,248,0.5)] cursor-pointer"
                   >
                     <Layers className="w-3.5 h-3.5" />
                     <span>Usar Foto del Nicho (+1,200 Fotos)</span>
@@ -1090,7 +1189,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                     type="button"
                     onClick={() => onGeneratePageImage(activePageIdx)}
                     disabled={generatingPageIdx !== null}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs transition-colors cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs transition-all shadow-[0_0_12px_rgba(251,191,36,0.5)] cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
                     <span>Generar con IA 3.1</span>
@@ -1101,19 +1200,42 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
             {/* Bottom Area of Left Stage: Key Quote + Picture-in-Picture Talking Avatar */}
             <div className="relative z-10 flex items-end justify-between gap-4 mt-auto pt-4">
-              <div className="bg-slate-950/85 backdrop-blur-md border border-slate-800/90 rounded p-3.5 space-y-1 flex-1">
-                <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-amber-400">
-                  <span>IDEA CLAVE DEL CAPÍTULO</span>
-                  <span>{currentPage.durationSec}s</span>
+              <div
+                className={`backdrop-blur-md rounded-xl p-4 space-y-1.5 flex-1 transition-all ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'bg-black/95 border-2 border-amber-400/90 shadow-[0_0_22px_rgba(251,191,36,0.35)]'
+                    : 'bg-slate-950/85 border border-slate-800/90'
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] font-mono uppercase tracking-widest font-black text-amber-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
+                    IDEA CLAVE DEL CAPÍTULO
+                  </span>
+                  <span className="bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-400/40">
+                    {currentPage.durationSec}s
+                  </span>
                 </div>
-                <p className="text-xs text-slate-200 font-medium leading-snug">
+                <p
+                  className={`font-black text-sm sm:text-base leading-snug tracking-wide ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]'
+                      : 'text-slate-200'
+                  }`}
+                >
                   “{currentPage.keyQuote}”
                 </p>
               </div>
 
               {/* Picture-in-Picture Live Talking Real Avatar */}
               {visualMode === 'avatar-and-scenes' && (
-                <div className="w-36 h-40 sm:w-44 sm:h-48 rounded-md overflow-hidden border-2 border-amber-500/80 shadow-2xl bg-[#0B0E17] shrink-0 relative">
+                <div
+                  className={`w-36 h-40 sm:w-44 sm:h-48 rounded-xl overflow-hidden shrink-0 relative transition-all ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'border-2 border-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.6)] bg-black'
+                      : 'border-2 border-amber-500/80 shadow-2xl bg-[#0B0E17]'
+                  }`}
+                >
                   <TalkingAvatarStage
                     avatar={selectedAvatar}
                     isSpeaking={isPlaying}
@@ -1125,29 +1247,70 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
           </div>
 
           {/* Right Page: Spoken Audiobook Text with High-Contrast Reading & Font Size Switcher */}
-          <div className="lg:col-span-6 bg-white p-6 sm:p-8 lg:p-10 flex flex-col justify-between relative">
+          <div
+            className={`lg:col-span-6 p-6 sm:p-8 lg:p-10 flex flex-col justify-between relative transition-colors ${
+              portadaContrastTheme === 'neon-bw'
+                ? 'bg-[#030508] text-white border-l border-amber-500/30'
+                : portadaContrastTheme === 'gold-obsidian'
+                ? 'bg-[#0B0E17] text-white border-l border-amber-500/20'
+                : 'bg-white text-slate-900 border-l border-slate-200'
+            }`}
+          >
             <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3 text-xs font-mono text-slate-700">
-                <span className="font-bold uppercase tracking-wider text-slate-900">
+              <div
+                className={`flex flex-wrap items-center justify-between gap-2 border-b pb-3 text-xs font-mono ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'border-white/15 text-white'
+                    : 'border-slate-200 text-slate-700'
+                }`}
+              >
+                <span
+                  className={`font-black uppercase tracking-wider ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'text-white text-xs drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] flex items-center gap-1.5'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {portadaContrastTheme === 'neon-bw' && (
+                    <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_#fbbf24]" />
+                  )}
                   {videoBook.bookTitle}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="text-slate-600 font-sans font-semibold">Tamaño de letra:</span>
+                  <span
+                    className={
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'text-slate-300 font-sans font-semibold'
+                        : 'text-slate-600 font-sans font-semibold'
+                    }
+                  >
+                    Tamaño de letra:
+                  </span>
                   {(['normal', 'large', 'xlarge'] as const).map((sz) => (
                     <button
                       key={sz}
                       type="button"
                       onClick={() => setReadingFontSize(sz)}
-                      className={`px-2 py-0.5 rounded font-sans font-bold text-xs border cursor-pointer ${
+                      className={`px-2 py-0.5 rounded font-sans font-bold text-xs border cursor-pointer transition-all ${
                         readingFontSize === sz
-                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          ? portadaContrastTheme === 'neon-bw'
+                            ? 'bg-amber-400 text-black border-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.6)] font-black'
+                            : 'bg-indigo-600 text-white border-indigo-600'
+                          : portadaContrastTheme === 'neon-bw'
+                          ? 'bg-black text-white border-amber-400/60 hover:border-amber-400'
                           : 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
                       }`}
                     >
                       {sz === 'normal' ? 'A' : sz === 'large' ? 'A+ Grande' : 'A++ Muy Grande'}
                     </button>
                   ))}
-                  <span className="text-indigo-700 font-bold ml-1">
+                  <span
+                    className={
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'text-amber-400 font-black ml-1 drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]'
+                        : 'text-indigo-700 font-bold ml-1'
+                    }
+                  >
                     Cap. {currentPage.pageNumber} / {pages.length}
                   </span>
                 </div>
@@ -1155,13 +1318,25 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
               <div className="space-y-2 pt-1">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-mono font-bold uppercase tracking-widest text-indigo-700">
+                  <span
+                    className={`text-xs font-mono font-black uppercase tracking-widest ${
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)]'
+                        : 'text-indigo-700'
+                    }`}
+                  >
                     CAPÍTULO {currentPage.pageNumber} · NARRADOR: #{selectedAvatar.number}{' '}
                     {selectedAvatar.name.toUpperCase()}
                   </span>
                   <div className="flex items-center gap-2">
                     {onUpdateChapterDuration && (
-                      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-300">
+                      <label
+                        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border ${
+                          portadaContrastTheme === 'neon-bw'
+                            ? 'bg-black text-white border-amber-400/60'
+                            : 'bg-slate-100 text-slate-700 border-slate-300'
+                        }`}
+                      >
                         <span>Duración Cap. (Sin límite):</span>
                         <input
                           type="number"
@@ -1174,27 +1349,39 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                               Math.max(5, Number(e.target.value) || 10)
                             )
                           }
-                          className="w-16 px-1.5 py-0.5 rounded bg-white border border-slate-300 text-xs font-mono font-bold text-slate-900"
+                          className={`w-16 px-1.5 py-0.5 rounded text-xs font-mono font-bold ${
+                            portadaContrastTheme === 'neon-bw'
+                              ? 'bg-slate-900 border border-amber-400 text-white'
+                              : 'bg-white border border-slate-300 text-slate-900'
+                          }`}
                         />
                         <span>seg</span>
                       </label>
                     )}
                     {isPlaying && (
-                      <span className="text-xs font-mono font-bold text-emerald-700 flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
+                      <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1 drop-shadow-[0_0_8px_rgba(16,185,129,0.7)]">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                         HABLANDO EN VIVO
                       </span>
                     )}
                   </div>
                 </div>
-                <h3 className="font-display text-2xl sm:text-3xl font-extrabold text-slate-950 leading-tight">
+                <h3
+                  className={`font-display text-2xl sm:text-3xl font-black leading-tight ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'text-white drop-shadow-[0_0_18px_rgba(255,255,255,0.35)]'
+                      : 'text-slate-950'
+                  }`}
+                >
                   {currentPage.chapterTitle}
                 </h3>
               </div>
 
-              {/* Synchronized Paragraph Text (High-Contrast Easy Reading) */}
+              {/* Synchronized Paragraph Text (High-Contrast Negro, Blanco y Neón Easy Reading) */}
               <div
-                className={`pt-3 space-y-2 leading-relaxed font-medium text-slate-900 ${
+                className={`pt-3 space-y-2 leading-relaxed ${
+                  portadaContrastTheme === 'neon-bw' ? 'text-white' : 'text-slate-900'
+                } ${
                   readingFontSize === 'xlarge'
                     ? 'text-xl sm:text-2xl leading-loose'
                     : readingFontSize === 'large'
@@ -1204,13 +1391,27 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               >
                 {sentences.map((sentence, sIdx) => {
                   const isSentenceActive = sIdx === activeSentenceIdx;
+                  if (portadaContrastTheme === 'neon-bw') {
+                    return (
+                      <span
+                        key={sIdx}
+                        className={`inline transition-all duration-300 rounded px-1.5 py-0.5 ${
+                          isSentenceActive
+                            ? 'portada-neon-active-sentence rounded-md'
+                            : 'text-white font-bold tracking-wide drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]'
+                        }`}
+                      >
+                        {sentence}{' '}
+                      </span>
+                    );
+                  }
                   return (
                     <span
                       key={sIdx}
                       className={`inline transition-colors duration-300 rounded px-1.5 py-0.5 ${
                         isSentenceActive
                           ? 'bg-amber-200 text-slate-950 font-bold shadow-2xs'
-                          : 'text-slate-900'
+                          : 'text-slate-900 font-medium'
                       }`}
                     >
                       {sentence}{' '}
@@ -1223,28 +1424,52 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             {/* Bottom of Right Page: Chapter Progress + Chapter Turn Controls */}
             <div className="pt-8 space-y-4">
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] font-mono text-slate-400">
+                <div
+                  className={`flex items-center justify-between text-[11px] font-mono ${
+                    portadaContrastTheme === 'neon-bw' ? 'text-white font-bold' : 'text-slate-400'
+                  }`}
+                >
                   <span>
                     {isPlaying
                       ? `Narrando con ${selectedAvatar.name} (${selectedAvatar.accent})...`
                       : 'Progreso de lectura del capítulo'}
                   </span>
-                  <span>{Math.round(pageProgress * 100)}%</span>
+                  <span className={portadaContrastTheme === 'neon-bw' ? 'text-amber-400 font-black' : ''}>
+                    {Math.round(pageProgress * 100)}%
+                  </span>
                 </div>
-                <div className="h-1.5 w-full bg-slate-900 rounded-sm overflow-hidden">
+                <div
+                  className={`h-2 w-full rounded-full overflow-hidden ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'bg-black border border-white/20'
+                      : 'bg-slate-900'
+                  }`}
+                >
                   <div
-                    className="h-full bg-amber-400 transition-all duration-150"
+                    className={`h-full transition-all duration-150 ${
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.95)]'
+                        : 'bg-amber-400'
+                    }`}
                     style={{ width: `${Math.round(pageProgress * 100)}%` }}
                   />
                 </div>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
+              <div
+                className={`flex items-center justify-between pt-2 border-t ${
+                  portadaContrastTheme === 'neon-bw' ? 'border-white/15' : 'border-slate-800/80'
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => jumpToPage(activePageIdx - 1)}
                   disabled={activePageIdx === 0}
-                  className="px-3 py-1.5 rounded bg-[#181C26] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 cursor-pointer transition-all ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'bg-black hover:bg-slate-900 border border-amber-400 text-white shadow-[0_0_10px_rgba(251,191,36,0.3)]'
+                      : 'bg-[#181C26] hover:bg-slate-800 border border-slate-700/80 text-slate-200'
+                  }`}
                 >
                   <ChevronLeft className="w-4 h-4" />
                   <span>Capítulo Anterior</span>
@@ -1258,9 +1483,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                       onClick={() => jumpToPage(idx)}
                       className={`h-2.5 rounded-sm transition-all cursor-pointer ${
                         idx === activePageIdx
-                          ? 'w-7 bg-amber-400'
+                          ? portadaContrastTheme === 'neon-bw'
+                            ? 'w-7 bg-amber-400 shadow-[0_0_10px_#fbbf24]'
+                            : 'w-7 bg-amber-400'
                           : pageImages[idx]
-                          ? 'w-2.5 bg-emerald-400/70 hover:bg-emerald-400'
+                          ? 'w-2.5 bg-emerald-400/80 hover:bg-emerald-400'
                           : 'w-2.5 bg-slate-700 hover:bg-slate-500'
                       }`}
                       title={`Ir a Capítulo ${p.pageNumber}: ${p.chapterTitle}`}
@@ -1272,7 +1499,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                   type="button"
                   onClick={() => jumpToPage(activePageIdx + 1)}
                   disabled={activePageIdx >= pages.length - 1}
-                  className="px-3 py-1.5 rounded bg-[#181C26] hover:bg-slate-800 border border-slate-700/80 text-xs font-medium text-slate-200 flex items-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-40 cursor-pointer transition-all ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'bg-black hover:bg-slate-900 border border-amber-400 text-white shadow-[0_0_10px_rgba(251,191,36,0.3)]'
+                      : 'bg-[#181C26] hover:bg-slate-800 border border-slate-700/80 text-slate-200'
+                  }`}
                 >
                   <span>Capítulo Siguiente</span>
                   <ChevronRight className="w-4 h-4" />
@@ -1283,12 +1514,22 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
         </div>
 
         {/* Unified Audiobook Playback & Download Footer Bar */}
-        <div className="bg-[#090B10] border-t border-slate-800 px-5 py-3.5 flex flex-wrap items-center justify-between gap-4">
+        <div
+          className={`px-5 py-4 flex flex-wrap items-center justify-between gap-4 transition-colors ${
+            portadaContrastTheme === 'neon-bw'
+              ? 'bg-black border-t-2 border-amber-400/70 shadow-[0_-8px_25px_rgba(0,0,0,0.9)]'
+              : 'bg-[#090B10] border-t border-slate-800'
+          }`}
+        >
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={togglePlay}
-              className="px-4 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-2 transition-colors cursor-pointer"
+              className={`px-4 py-2.5 rounded-xl font-black text-xs flex items-center gap-2 transition-all cursor-pointer ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-amber-400 hover:bg-amber-300 text-black shadow-[0_0_20px_rgba(251,191,36,0.65)] ring-1 ring-amber-400'
+                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold'
+              }`}
             >
               {isPlaying ? (
                 <>
@@ -1306,7 +1547,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             <button
               type="button"
               onClick={restartBook}
-              className="p-2 rounded bg-[#141720] hover:bg-slate-800 border border-slate-800 text-slate-300 cursor-pointer"
+              className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white shadow-[0_0_8px_rgba(251,191,36,0.2)]'
+                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-300'
+              }`}
               title="Reiniciar desde el capítulo 1"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -1315,7 +1560,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             <button
               type="button"
               onClick={() => setIsMuted((m) => !m)}
-              className="p-2 rounded bg-[#141720] hover:bg-slate-800 border border-slate-800 text-slate-300 cursor-pointer"
+              className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white shadow-[0_0_8px_rgba(251,191,36,0.2)]'
+                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-300'
+              }`}
               title={isMuted ? 'Activar voz' : 'Silenciar voz'}
             >
               {isMuted ? (
@@ -1325,7 +1574,13 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               )}
             </button>
 
-            <span className="text-xs font-mono text-slate-400">
+            <span
+              className={`text-xs font-mono font-bold ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
+                  : 'text-slate-400'
+              }`}
+            >
               {formatSec(currentTime)} / {formatSec(pageTimings.totalDuration)}
             </span>
 
@@ -1333,7 +1588,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               <select
                 value={activeTake?.id || ''}
                 onChange={(e) => onSelectTake(e.target.value)}
-                className="bg-[#141720] border border-slate-800 rounded px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                className={`border rounded px-2.5 py-1 text-xs focus:outline-none ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'bg-black border-amber-400 text-white'
+                    : 'bg-[#141720] border-slate-800 text-slate-200'
+                }`}
               >
                 {takes.map((t, i) => (
                   <option key={t.id} value={t.id}>
@@ -1353,7 +1612,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                   .toLowerCase()
                   .replace(/[^a-z0-9]+/g, '-')
                   .slice(0, 35)}-audiolibro-video.mp4`}
-                className="px-3 py-1.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Descargar MP4 Listo</span>
@@ -1363,7 +1622,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             <button
               type="button"
               onClick={onExportMp3}
-              className="px-3 py-1.5 rounded bg-[#141720] hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className={`px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white font-bold shadow-[0_0_10px_rgba(251,191,36,0.2)]'
+                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-200'
+              }`}
             >
               <Download className="w-3.5 h-3.5 text-sky-400" />
               <span>Descargar Audiolibro (.MP3)</span>
@@ -1372,7 +1635,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             <button
               type="button"
               onClick={onExportPdf}
-              className="px-3 py-1.5 rounded bg-[#141720] hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className={`px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white font-bold shadow-[0_0_10px_rgba(251,191,36,0.2)]'
+                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-200'
+              }`}
             >
               <FileDown className="w-3.5 h-3.5 text-amber-400" />
               <span>Libro (.PDF)</span>
@@ -1381,7 +1648,11 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             <button
               type="button"
               onClick={onExportTxt}
-              className="px-3 py-1.5 rounded bg-[#141720] hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className={`px-3 py-1.5 rounded-lg border text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                portadaContrastTheme === 'neon-bw'
+                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white font-bold shadow-[0_0_10px_rgba(251,191,36,0.2)]'
+                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-200'
+              }`}
             >
               <FileText className="w-3.5 h-3.5 text-slate-400" />
               <span>Texto (.TXT)</span>
@@ -1417,23 +1688,47 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               <div
                 key={p.pageNumber}
                 onClick={() => jumpToPage(idx)}
-                className={`group rounded-xl border p-3.5 transition-all cursor-pointer flex flex-col justify-between gap-2.5 bg-white ${
-                  isCurrent
-                    ? 'border-indigo-600 ring-2 ring-indigo-600/20 shadow-md'
-                    : 'border-slate-200 hover:border-slate-400 shadow-2xs'
+                className={`group rounded-xl border p-3.5 transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? isCurrent
+                      ? 'bg-black border-2 border-amber-400 ring-2 ring-amber-400/40 shadow-[0_0_20px_rgba(251,191,36,0.45)]'
+                      : 'bg-[#05070B] border border-amber-400/50 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(251,191,36,0.3)]'
+                    : isCurrent
+                    ? 'bg-white border-indigo-600 ring-2 ring-indigo-600/20 shadow-md'
+                    : 'bg-white border-slate-200 hover:border-slate-400 shadow-2xs'
                 }`}
               >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-mono font-bold">
-                    <span className={isCurrent ? 'text-indigo-700' : 'text-slate-700'}>
+                    <span
+                      className={
+                        portadaContrastTheme === 'neon-bw'
+                          ? isCurrent
+                            ? 'text-amber-300 font-black drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]'
+                            : 'text-amber-400 font-bold'
+                          : isCurrent
+                          ? 'text-indigo-700'
+                          : 'text-slate-700'
+                      }
+                    >
                       CAPÍTULO {p.pageNumber}
                     </span>
-                    <span className="text-slate-600">{p.durationSec}s</span>
+                    <span
+                      className={
+                        portadaContrastTheme === 'neon-bw' ? 'text-slate-300 font-mono' : 'text-slate-600'
+                      }
+                    >
+                      {p.durationSec}s
+                    </span>
                   </div>
 
                   {/* Mini Thumbnail Preview */}
                   <div
-                    className="h-24 w-full rounded-lg overflow-hidden border border-slate-200 relative flex items-center justify-center"
+                    className={`h-24 w-full rounded-lg overflow-hidden border relative flex items-center justify-center ${
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'border-amber-400/40 bg-black'
+                        : 'border-slate-200'
+                    }`}
                     style={{
                       background: `linear-gradient(135deg, ${p.primaryHex} 0%, ${p.secondaryHex} 100%)`,
                     }}
@@ -1452,10 +1747,22 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                     )}
                   </div>
 
-                  <h4 className="text-sm font-bold text-slate-950 leading-snug break-words">
+                  <h4
+                    className={`text-sm font-bold leading-snug break-words ${
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
+                        : 'text-slate-950'
+                    }`}
+                  >
                     {p.chapterTitle}
                   </h4>
-                  <p className="text-xs text-slate-700 line-clamp-3 leading-relaxed">
+                  <p
+                    className={`text-xs line-clamp-3 leading-relaxed ${
+                      portadaContrastTheme === 'neon-bw'
+                        ? 'text-slate-200 font-medium'
+                        : 'text-slate-700'
+                    }`}
+                  >
                     {p.pageText}
                   </p>
                 </div>
@@ -1467,16 +1774,20 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                     onGeneratePageImage(idx);
                   }}
                   disabled={generatingPageIdx === idx || isGeneratingAllPages}
-                  className="w-full mt-1 py-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-indigo-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  className={`w-full mt-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    portadaContrastTheme === 'neon-bw'
+                      ? 'bg-black hover:bg-slate-900 border border-amber-400/80 text-white shadow-[0_0_8px_rgba(251,191,36,0.25)] hover:shadow-[0_0_15px_rgba(251,191,36,0.5)]'
+                      : 'bg-slate-900 hover:bg-indigo-600 text-white'
+                  }`}
                 >
                   {generatingPageIdx === idx ? (
                     <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
                       <span>Creando escena...</span>
                     </>
                   ) : (
                     <>
-                      <Sparkles className="w-3.5 h-3.5" />
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                       <span>{img ? 'Cambiar escena IA' : 'Generar escena IA'}</span>
                     </>
                   )}

@@ -40,6 +40,13 @@ export interface StoryboardSceneRow {
   imageUrl?: string;
 }
 
+export interface ProposalSeoMetadata {
+  seoTitle: string;
+  seoDescription: string;
+  keywords?: string;
+  author?: string;
+}
+
 export interface AudiovisualProposal {
   projectTitle: string;
   targetFormat: string;
@@ -65,6 +72,7 @@ export interface AudiovisualProposal {
     transitionSfx: string[];
   };
   fullVoiceoverScript: string;
+  seoMetadata?: ProposalSeoMetadata;
 }
 
 function slugifyTitle(title: string): string {
@@ -416,6 +424,14 @@ export function exportProposalAsTxt(proposal: AudiovisualProposal): void {
     `MOTOR VISUAL IA     : ${proposal.aiTool}`,
     '',
     divider,
+    'METADATOS SEO Y SOCIAL SHARING (OPEN GRAPH / TWITTER CARDS)',
+    divider,
+    `TÍTULO SEO (DOCUMENTO) : ${proposal.seoMetadata?.seoTitle || proposal.projectTitle}`,
+    `DESCRIPCIÓN META SEO   : ${proposal.seoMetadata?.seoDescription || proposal.analysisSynthesis.coreMessage}`,
+    `KEYWORDS / ETIQUETAS   : ${proposal.seoMetadata?.keywords || 'video IA, storyboard, propuesta audiovisual, Kinetix'}`,
+    `AUTOR / CREADOR        : ${proposal.seoMetadata?.author || 'Kinetix — Video AI Lab'}`,
+    '',
+    divider,
     '1. ANÁLISIS Y SÍNTESIS DEL CONTENIDO',
     divider,
     `MENSAJE CENTRAL:`,
@@ -602,6 +618,26 @@ export function exportProposalAsPdf(proposal: AudiovisualProposal): void {
     [0.25, 0.28, 0.35]
   );
   addTextLine(`TONO Y ESTILO: ${proposal.narrativeTone}`, 'F3', 8, 12, [0.25, 0.28, 0.35]);
+
+  if (proposal.seoMetadata?.seoTitle || proposal.seoMetadata?.seoDescription) {
+    cursorY -= 2;
+    addTextLine(
+      `METADATOS SEO: ${proposal.seoMetadata.seoTitle.slice(0, 68)}`,
+      'F2',
+      8,
+      11.5,
+      [0.78, 0.44, 0.02]
+    );
+    addWrappedParagraph(
+      `Descripcion Meta: ${proposal.seoMetadata.seoDescription.slice(0, 160)}`,
+      'F3',
+      7.5,
+      10.5,
+      90,
+      [0.3, 0.34, 0.42]
+    );
+  }
+
   cursorY -= 4;
   addHorizontalRule();
 
@@ -746,7 +782,8 @@ export function exportProposalAsPdf(proposal: AudiovisualProposal): void {
     pageWidth,
     pageHeight,
     marginX,
-    `${slugifyTitle(proposal.projectTitle)}-propuesta-audiovisual.pdf`
+    `${slugifyTitle(proposal.seoMetadata?.seoTitle || proposal.projectTitle)}-propuesta-audiovisual.pdf`,
+    proposal.seoMetadata
   );
 }
 
@@ -755,7 +792,8 @@ function buildAndDownloadPdfDocument(
   pageWidth: number,
   pageHeight: number,
   marginX: number,
-  filename: string
+  filename: string,
+  meta?: ProposalSeoMetadata
 ): void {
   const objects: string[] = [];
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>';
@@ -790,6 +828,14 @@ function buildAndDownloadPdfDocument(
   const kidsArray = pageObjectIds.map((id) => `${id} 0 R`).join(' ');
   objects[2] = `<< /Type /Pages /Kids [ ${kidsArray} ] /Count ${pageObjectIds.length} >>`;
 
+  // Embed official SEO & OpenGraph Document Metadata in PDF /Info Dictionary
+  const infoObjId = nextObjId++;
+  const pdfTitle = toPdfWinAnsiString(meta?.seoTitle || filename.replace(/\.pdf$/i, ''));
+  const pdfSubject = toPdfWinAnsiString(meta?.seoDescription || 'Propuesta Audiovisual Kinetix Video AI Lab');
+  const pdfAuthor = toPdfWinAnsiString(meta?.author || 'Kinetix — Video AI Lab');
+  const pdfKeywords = toPdfWinAnsiString(meta?.keywords || 'video IA, storyboard, propuesta audiovisual');
+  objects[infoObjId] = `<< /Title ${pdfTitle} /Subject ${pdfSubject} /Author ${pdfAuthor} /Keywords ${pdfKeywords} /Creator (Kinetix Director Audiovisual) /Producer (Kinetix PDF Engine) >>`;
+
   let pdfText = '%PDF-1.4\n';
   const offsets: number[] = [0];
 
@@ -805,7 +851,7 @@ function buildAndDownloadPdfDocument(
     pdfText += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
   }
 
-  pdfText += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  pdfText += `trailer\n<< /Size ${objects.length} /Root 1 0 R /Info ${infoObjId} 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
 
   const bytes = new Uint8Array(pdfText.length);
   for (let i = 0; i < pdfText.length; i++) {

@@ -32,6 +32,7 @@ import {
   DollarSign,
   ShoppingBag,
   ShieldCheck,
+  HelpCircle,
 } from 'lucide-react';
 import { pcmBase64ToWav } from './utils/audioWav';
 import {
@@ -94,6 +95,7 @@ import {
   STUDIO_MODULE_SEO_MAP,
   STUDIO_MODULE_LIST,
   applyStudioModuleSeoMeta,
+  applyDynamicStudioSeo,
   STUDIO_PDF_LIBRARY_12,
   StudioModuleId,
 } from './utils/seoMetadata';
@@ -101,6 +103,9 @@ import {
   FuturisticGoldLogo,
   FuturisticLogoModal,
 } from './components/FuturisticGoldLogo';
+import { SupportConciergeModal } from './components/SupportConciergeModal';
+import { ProposalSeoEditor } from './components/ProposalSeoEditor';
+import { BuyTokensModal } from './components/BuyTokensModal';
 
 type ActiveModule = StudioModuleId;
 
@@ -280,6 +285,13 @@ const INITIAL_PROPOSAL: AudiovisualProposal = {
   },
   fullVoiceoverScript:
     'El ochenta y dos por ciento de tu audiencia decide en cuatro segundos si te escucha o te ignora. La inteligencia artificial ya reduce un sesenta y ocho por ciento el tiempo de preproducción, pero la velocidad sin dirección no basta. El primer secreto está en la síntesis: eliminar el ruido técnico y extraer únicamente la emoción y el dato que transforman la historia. El segundo es dirigir la cámara dentro del prompt: definir óptica, atmósfera lumínica y movimiento en cada escena. Cuando sincronizas locución expresiva, diseño sonoro y narrativa visual, multiplicas por tres punto cuatro veces tu impacto. Convierte hoy tus documentos en producciones listas para publicar. Envía este guion a locución y genera tus clips ahora.',
+  seoMetadata: {
+    seoTitle: 'Cómo la IA Reduce 70% en Preproducción Audiovisual | Kinetix',
+    seoDescription:
+      'Propuesta y storyboard técnico adaptado desde PDF: ganchos de alta retención, desglose escena por escena y prompts optimizados para generación de video IA.',
+    keywords: 'video IA, storyboard PDF, propuesta audiovisual, dirección de video, Kinetix',
+    author: 'Kinetix — Video AI Lab',
+  },
 };
 
 const INITIAL_SCRIPT: GeneratedScript = {
@@ -841,7 +853,19 @@ ${textoPdf || '{{texto_pdf}}'}
         throw new Error(data.error || 'No se pudo generar la propuesta audiovisual.');
       }
       if (data.proposal) {
-        setProposal(data.proposal);
+        const defaultSeoTitle = `${(data.proposal.projectTitle || 'Propuesta Audiovisual').slice(0, 42)} — Storyboard & Video IA | Kinetix`;
+        const defaultSeoDesc = (data.proposal.analysisSynthesis?.coreMessage || '').slice(0, 155) || 'Propuesta audiovisual completa adaptada desde documento PDF.';
+        const enrichedProposal = {
+          ...data.proposal,
+          seoMetadata: {
+            seoTitle: defaultSeoTitle,
+            seoDescription: defaultSeoDesc,
+            keywords: 'video IA, storyboard PDF, propuesta audiovisual, prompts Veo',
+            author: 'Kinetix — Video AI Lab',
+          },
+        };
+        setProposal(enrichedProposal);
+        applyDynamicStudioSeo('pdf-director', defaultSeoTitle);
       }
     } catch (err: any) {
       setProposalError(err?.message || 'Error al generar la propuesta audiovisual.');
@@ -1954,6 +1978,29 @@ ${textoPdf || '{{texto_pdf}}'}
   // Administrator Account Session (garciasaul501@gmail.com / Garciasaul@501)
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isViralLogoModalOpen, setIsViralLogoModalOpen] = useState(false);
+  const [isSupportConciergeOpen, setIsSupportConciergeOpen] = useState(false);
+  const [isBuyTokensModalOpen, setIsBuyTokensModalOpen] = useState(false);
+  const [userTokenBalance, setUserTokenBalance] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('kinetix_user_tokens');
+      return saved ? Number(saved) || 62500 : 62500;
+    } catch {
+      return 62500;
+    }
+  });
+
+  const handleTokensPurchased = (tokensToAdd: number, _amountPaid: number, _packageName: string) => {
+    setUserTokenBalance((prev) => {
+      const next = prev + tokensToAdd;
+      try {
+        localStorage.setItem('kinetix_user_tokens', String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  };
+
   const [isGoldModel, setIsGoldModel] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('kinetix_gold_model_mode');
@@ -2131,16 +2178,16 @@ ${textoPdf || '{{texto_pdf}}'}
               <span className="sm:hidden">Oro {isGoldModel ? 'ON' : 'OFF'}</span>
             </button>
 
-            {/* Logotipo Futurista Viral Modal Launcher */}
+            {/* Asistente Oficial de Soporte y Onboarding (Concierge Customer Success) */}
             <button
               type="button"
-              onClick={() => setIsViralLogoModalOpen(true)}
-              className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_14px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
-              title="Ver y descargar el nuevo Logotipo Futurista Viral en SVG y PNG 4K"
+              onClick={() => setIsSupportConciergeOpen(true)}
+              className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
+              title="Abrir Asistente Oficial de Soporte y Onboarding"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Logotipo Viral 2050</span>
-              <span className="md:hidden">Logo 2050</span>
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Asistente & Soporte</span>
+              <span className="md:hidden">Ayuda</span>
             </button>
 
             <button
@@ -2166,6 +2213,25 @@ ${textoPdf || '{{texto_pdf}}'}
                 {adminSession ? `Admin · ${adminSession.user.email}` : 'Acceso Admin'}
               </span>
               <span className="xl:hidden">Admin</span>
+            </button>
+
+            {/* Buy Tokens Button (Exact Match to User Screenshot with 3D Coin & Lightning Bolt) */}
+            <button
+              type="button"
+              onClick={() => setIsBuyTokensModalOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white font-extrabold text-xs flex items-center gap-2 border border-amber-400/80 shadow-[0_0_15px_rgba(251,191,36,0.3)] hover:shadow-[0_0_20px_rgba(251,191,36,0.55)] transition-all cursor-pointer"
+              title="Comprar Tokens con PayPal (Monetización Segura sin exponer tu cuenta)"
+            >
+              <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 flex items-center justify-center text-slate-950 font-black text-[10px] shadow-xs">
+                ⚡
+              </span>
+              <span className="font-mono text-amber-300 font-black text-xs">
+                {userTokenBalance.toLocaleString()}
+              </span>
+              <span className="hidden sm:inline text-[11px] text-slate-300">Tokens</span>
+              <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wide">
+                + Comprar
+              </span>
             </button>
 
             <button
@@ -2284,6 +2350,7 @@ ${textoPdf || '{{texto_pdf}}'}
             onExportCurrentMp4={handleExportVideoBookMp4}
             externalCheckoutProduct={externalPayPalProduct}
             onClearExternalCheckout={() => setExternalPayPalProduct(null)}
+            onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
           />
         )}
 
@@ -3464,6 +3531,20 @@ ${textoPdf || '{{texto_pdf}}'}
                   </div>
                 </div>
               </div>
+
+              {/* EDICIÓN MANUAL DE METADATOS SEO (TÍTULO Y DESCRIPCIÓN) PARA DOCUMENTOS GENERADOS */}
+              <ProposalSeoEditor
+                initialTitle={proposal.projectTitle}
+                initialDescription={proposal.analysisSynthesis.coreMessage}
+                currentSeoMeta={proposal.seoMetadata}
+                onSaveSeoMetadata={(seoMeta) => {
+                  setProposal((prev) => ({
+                    ...prev,
+                    seoMetadata: seoMeta,
+                  }));
+                  applyDynamicStudioSeo('pdf-director', seoMeta.seoTitle);
+                }}
+              />
 
               {/* 3. TABLA DE STORYBOARD ESCENA POR ESCENA */}
               <div className="bg-[#111318] border border-white/8 rounded-xl overflow-hidden flex flex-col">
@@ -5584,6 +5665,33 @@ ${textoPdf || '{{texto_pdf}}'}
           }}
         />
       )}
+
+      {/* Asistente Oficial de Soporte y Onboarding Concierge Modal */}
+      <SupportConciergeModal
+        isOpen={isSupportConciergeOpen}
+        onClose={() => setIsSupportConciergeOpen(false)}
+        onNavigateModule={(mod) => setActiveModule(mod as any)}
+        onToggleGoldModel={() => {
+          const next = !isGoldModel;
+          setIsGoldModel(next);
+          try {
+            localStorage.setItem('kinetix_gold_model_mode', String(next));
+          } catch {
+            // ignore
+          }
+        }}
+        isGoldModelActive={isGoldModel}
+        onOpenAdmin={() => setIsAdminModalOpen(true)}
+        onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+      />
+
+      {/* Buy Tokens Modal (Exact match to User Screenshot with 3D Gold Coin & Real PayPal Checkout) */}
+      <BuyTokensModal
+        isOpen={isBuyTokensModalOpen}
+        onClose={() => setIsBuyTokensModalOpen(false)}
+        currentBalance={userTokenBalance}
+        onTokensPurchased={handleTokensPurchased}
+      />
 
       {/* Quiet Studio Footer */}
       <footer className="border-t border-white/6 py-4 px-6 mt-12">

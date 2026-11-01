@@ -41,6 +41,7 @@ interface PayPalMonetizationHubProps {
   onExportCurrentMp4: () => void;
   externalCheckoutProduct?: PayPalProductItem | null;
   onClearExternalCheckout?: () => void;
+  onOpenBuyTokens?: () => void;
 }
 
 interface SubscriptionPlan {
@@ -101,18 +102,21 @@ const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-const PAYPAL_BUSINESS_EMAIL = 'garciasaul501@gmail.com';
-
-function buildPayPalSubscribeUrl(planName: string, amount: number): string {
-  const params = new URLSearchParams({
-    cmd: '_xclick',
-    business: PAYPAL_BUSINESS_EMAIL,
-    item_name: `Kinetix Studio - ${planName}`,
-    amount: amount.toFixed(2),
-    currency_code: 'USD',
-    no_shipping: '1',
-  });
-  return `https://www.paypal.com/cgi-bin/webscr?${params.toString()}`;
+async function fetchPayPalCheckoutUrl(planName: string, amount: number): Promise<string> {
+  try {
+    const res = await fetch('/api/paypal/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemName: `Kinetix Studio - ${planName}`,
+        amount,
+      }),
+    });
+    const data = await res.json();
+    return data.checkoutUrl || 'https://www.paypal.com';
+  } catch {
+    return 'https://www.paypal.com';
+  }
 }
 
 export const PayPalLogoBadge: React.FC<{ className?: string }> = ({ className = '' }) => (
@@ -127,6 +131,7 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
   onExportCurrentMp4,
   externalCheckoutProduct,
   onClearExternalCheckout,
+  onOpenBuyTokens,
 }) => {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [isSubscribed, setIsSubscribed] = useState<boolean>(() => {
@@ -155,11 +160,11 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
     if (onClearExternalCheckout) onClearExternalCheckout();
   };
 
-  const handleConfirmSubscription = (openExternalPayPal: boolean) => {
+  const handleConfirmSubscription = async (openExternalPayPal: boolean) => {
     if (!selectedPlan) return;
 
     if (openExternalPayPal) {
-      const url = buildPayPalSubscribeUrl(selectedPlan.name, selectedPlan.price);
+      const url = await fetchPayPalCheckoutUrl(selectedPlan.name, selectedPlan.price);
       window.open(url, '_blank', 'noopener,noreferrer');
     }
 
@@ -202,6 +207,16 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
               <Zap className="w-4 h-4 text-amber-400" />
               <span>Suscríbete ahora</span>
             </button>
+
+            {onOpenBuyTokens && (
+              <button
+                type="button"
+                onClick={onOpenBuyTokens}
+                className="px-6 py-3.5 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-400/20 transition-all cursor-pointer"
+              >
+                <span>⚡ Comprar Tokens (62.5k - 625k)</span>
+              </button>
+            )}
 
             {isSubscribed && (
               <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">

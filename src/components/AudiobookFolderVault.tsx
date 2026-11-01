@@ -980,22 +980,22 @@ export const AudiobookFolderVault: React.FC<AudiobookFolderVaultProps> = ({
               return (
                 <article
                   key={item.id}
-                  className={`bg-[#0B0D13] border rounded-md overflow-hidden flex flex-col justify-between transition-all ${
+                  className={`portada-neon-card rounded-xl overflow-hidden flex flex-col justify-between transition-all bg-black ${
                     isSelected
-                      ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-xl shadow-amber-500/10'
-                      : 'border-slate-800/90 hover:border-amber-500/40'
+                      ? 'border-2 border-amber-400 ring-2 ring-amber-400/50 shadow-xl shadow-amber-500/20'
+                      : 'border border-amber-400/50 hover:border-amber-400 hover:shadow-[0_0_20px_rgba(251,191,36,0.35)]'
                   }`}
                 >
                   <div>
                     {/* Cover Scene + Avatar Overlay */}
-                    <div className="relative h-36 bg-slate-950 overflow-hidden border-b border-slate-800">
+                    <div className="relative h-36 bg-black overflow-hidden border-b border-amber-500/30">
                       <img
                         src={item.coverImageUrl}
                         alt={item.title}
                         referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover opacity-85"
+                        className="w-full h-full object-cover opacity-90"
                       />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0B0D13] via-black/30 to-transparent" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
 
                       {/* Top Metadata Row with Checkbox for Batch Selection */}
                       <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 z-10">
@@ -1104,7 +1104,7 @@ export const AudiobookFolderVault: React.FC<AudiobookFolderVaultProps> = ({
                         </div>
                       ) : (
                         <div className="flex items-start justify-between gap-2">
-                          <h3 className="text-sm font-bold text-white leading-snug line-clamp-2">
+                          <h3 className="text-sm font-black text-white leading-snug line-clamp-2 drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]">
                             {item.title}
                           </h3>
                           <button

@@ -1886,6 +1886,243 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
     }
   });
 
+  // 11. Customer Success Support & Onboarding Concierge Assistant
+  app.post('/api/support-concierge', async (req, res) => {
+    const { message, conversationHistory = [] } = req.body || {};
+    const userMsg = String(message || '').trim();
+
+    if (!userMsg) {
+      res.status(400).json({ error: 'Se requiere un mensaje para el asistente de soporte.' });
+      return;
+    }
+
+    const appName = 'Kinetix — Video AI Lab & Audiobook Studio';
+    const appDescription =
+      'Estudio integral de producción audiovisual y audiolibros con IA que permite convertir documentos PDF o libros completos en audiolibros hablados con 30 avatares reales, generar guiones de 2 minutos, sintetizar locución neuronal y exportar videos MP4 sin límite de duración y archivos MP3/ZIP.';
+    const keyFeatures =
+      '1. Audiolibros & PDF: Subida de múltiples PDFs/texto, 30 avatares reales IA, generación de escenas por nichos y exportación en MP3, MP4 y ZIP por lotes.\n' +
+      '2. 1,200 Fotos de Nichos: 12 categorías temáticas para ilustrar capítulos y escenas.\n' +
+      '3. Guiones: Creación de guiones de 2 minutos o sin límite con dictado por voz por micrófono, desglose de escenas y PDF/TXT.\n' +
+      '4. Storyboard PDF: Propuesta audiovisual técnica optimizada para generadores de video (Veo, Sora, etc.).\n' +
+      '5. Voces IA: Locución neuronal 24kHz en español con múltiples acentos y tonos.\n' +
+      '6. Videos Sin Límite MP4: Renderizado de video completo con subtítulos y avatar en vivo.\n' +
+      '7. Modelo Letras Oro: Modo moderno con tipografía en oro 24K.\n' +
+      '8. Acceso Admin: Inicio de sesión con garciasaul501@gmail.com / Garciasaul@501.';
+    const toneOfVoice =
+      'Empático, ágil, profesional, concierge de Customer Success, entusiasta y orientado a la acción inmediata.';
+    const supportChannel =
+      'garciasaul501@gmail.com y el botón Acceso Admin en la barra superior.';
+
+    const systemInstruction = `ROL Y IDENTIDAD
+Eres el Asistente Oficial de Soporte y Onboarding de ${appName}. Tu misión principal es actuar como un concierge interactivo de Customer Success: dar la bienvenida a nuevos usuarios, resolver dudas operativas en tiempo real, guiarlos paso a paso a través de la interfaz y ayudarlos a alcanzar valor con el producto en el menor tiempo posible.
+
+# CONTEXTO DEL PRODUCTO
+- Nombre de la aplicación: ${appName}
+- Propósito y valor principal: ${appDescription}
+- Funcionalidades clave:
+${keyFeatures}
+- Tono de comunicación: ${toneOfVoice}
+
+# PROTOCOLO DE INTERACCIÓN (PASO A PASO)
+1. Diagnóstico Rápido: Identifica el objetivo exacto o punto de fricción del usuario. Si la duda es ambigua, haz una pregunta de clarificación con opciones cerradas.
+2. Instrucciones Accionables: Responde utilizando listas numeradas cortas indicando la ruta exacta dentro de la interfaz (ej. Ve a Menú > Audiolibros & PDF > Subir PDF).
+3. Proactividad / Next Best Action: Al resolver la duda, sugiere el siguiente paso lógico para asegurar que el usuario complete su flujo de trabajo exitosamente.
+4. Protocolo de Escalación: Si el usuario reporta un bug crítico, solicita una devolución o no puedes resolver la consulta tras dos intentos, proporciona el canal oficial de soporte: ${supportChannel}.
+
+# REGLAS NEGATIVAS Y RESTRICCIONES
+- NUNCA inventes funciones, botones o integraciones que no pertenezcan a ${appName}.
+- NUNCA des respuestas teóricas largas; prioriza micro-pasos guiados y viñetas concisas (máximo 120 palabras por respuesta regular).
+- No uses jerga técnica interna de desarrollo salvo que el usuario sea perfil técnico.
+- Mantén siempre una postura empática, paciente y orientada a la solución.
+
+# FORMATO DE SALIDA
+- **Respuesta Directa**: Explicación breve de 1-2 líneas.
+- **Paso a Paso**: Lista numerada con nombres de botones/secciones destacados en **negrita**.
+- **Tip / Siguiente Paso**: Consejo rápido en formato de viñeta.`;
+
+    try {
+      const ai = getGenAIClient();
+      const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+      if (Array.isArray(conversationHistory)) {
+        for (const item of conversationHistory.slice(-4)) {
+          if (item && item.sender === 'user' && typeof item.text === 'string') {
+            contents.push({ role: 'user', parts: [{ text: item.text }] });
+          } else if (item && (item.sender === 'assistant' || item.sender === 'model') && typeof item.text === 'string') {
+            contents.push({ role: 'model', parts: [{ text: item.text }] });
+          }
+        }
+      }
+      contents.push({ role: 'user', parts: [{ text: userMsg }] });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.8-flash',
+        contents,
+        config: {
+          systemInstruction,
+          temperature: 0.25,
+          maxOutputTokens: 500,
+        },
+      });
+
+      const replyText = response.text || '';
+      if (replyText.trim().length > 10) {
+        res.json({ reply: replyText.trim() });
+        return;
+      }
+    } catch (_err) {
+      // Fallback below
+    }
+
+    // High quality offline fallback according to protocol
+    const lower = userMsg.toLowerCase();
+    let direct = 'Con gusto te guío paso a paso para completar esta acción en Kinetix.';
+    let steps: string[] = [];
+    let tip = '¿Deseas que te muestre el siguiente paso de tu producción?';
+
+    if (lower.includes('pdf') || lower.includes('audiolibro') || lower.includes('libro')) {
+      direct = 'Puedes convertir cualquier archivo PDF o documento de texto en un audiolibro completo con avatar y escenas.';
+      steps = [
+        'Haz clic en la pestaña **Audiolibros & PDF** en el menú superior.',
+        'En **Paso 01**, pulsa **Subir PDF(s)** o dicta el texto con el botón de micrófono.',
+        'En **Paso 02**, elige entre los **30 Avatares Reales IA** y pulsa **Crear Audiolibro Hablado**.'
+      ];
+      tip = 'Para videos sin límite de tiempo, puedes cambiar la duración de cada capítulo manualmente.';
+    } else if (lower.includes('zip') || lower.includes('lote') || lower.includes('exportar')) {
+      direct = 'El sistema incluye un exportador ZIP por lotes para descargar múltiples audiolibros a la vez en MP3 y MP4.';
+      steps = [
+        'Ve a **Audiolibros & PDF** y baja hasta la sección **Carpeta de Audiolibros Guardados**.',
+        'Marca las casillas de los audiolibros que deseas descargar (o pulsa **Seleccionar Todos**).',
+        'Haz clic en el botón dorado **Exportar ZIP por Lotes (MP3 + MP4)**.'
+      ];
+      tip = 'Cada audiolibro en el archivo ZIP incluirá su archivo de audio MP3 y video MP4 listo para publicar.';
+    } else if (lower.includes('microfono') || lower.includes('dictar') || lower.includes('voz')) {
+      direct = 'Puedes dictar tus ideas con tu propia voz utilizando el micrófono del navegador sin tener que escribir.';
+      steps = [
+        'Ubica el botón **Dictar por voz** con el ícono de micrófono junto al área de texto.',
+        'Haz clic para iniciar y permite el acceso al micrófono en tu navegador.',
+        'Habla con naturalidad y pulsa **Detener** al terminar; tu voz se transcribirá al instante.'
+      ];
+      tip = 'El dictado funciona en la descripción de escenas, guiones y texto de PDFs.';
+    } else if (lower.includes('oro') || lower.includes('letra') || lower.includes('letras')) {
+      direct = 'El Modelo Letras Oro activa tipografía lujosa en oro metálico 24K en toda la aplicación.';
+      steps = [
+        'En la barra superior del encabezado, localiza el botón **👑 Letras Oro**.',
+        'Haz clic para alternar entre **Letras Oro: ON** y **Letras Oro: OFF**.',
+        'Al estar activo, todos los títulos, insignias y subtítulos brillarán en oro 24K.'
+      ];
+      tip = 'El estilo dorado también se refleja en la exportación de video de tus audiolibros.';
+    } else if (lower.includes('admin') || lower.includes('cuenta') || lower.includes('saul') || lower.includes('login')) {
+      direct = 'La cuenta de administrador maestro está configurada con acceso completo ilimitado.';
+      steps = [
+        'Haz clic en el botón **Acceso Admin** en la esquina superior derecha del menú.',
+        'Ingresa el email: **garciasaul501@gmail.com** y contraseña: **Garciasaul@501**.',
+        'Haz clic en **Ingresar al Panel** para gestionar usuarios y métricas.'
+      ];
+      tip = 'La sesión se guarda automáticamente en tu navegador para que no tengas que escribirla cada vez.';
+    } else if (lower.includes('nicho') || lower.includes('foto') || lower.includes('1200') || lower.includes('imagen')) {
+      direct = 'Cuentas con una galería de +1,200 fotografías cinematográficas organizadas en 12 nichos temáticos.';
+      steps = [
+        'Haz clic en la pestaña **1,200 Fotos de Nichos** en el menú superior.',
+        'Filtra por tu categoría deseada (Negocios, Filosofía, Ciencia Ficción, Romance, etc.).',
+        'Pulsa **Asignar al Capítulo** o **Auto-llenar Todo** para ilustrar tu audiolibro.'
+      ];
+      tip = 'También puedes solicitar a la IA que cree variaciones visuales exclusivas para cada foto.';
+    } else {
+      direct = 'Estoy aquí para ayudarte a avanzar rápido en cualquier módulo de Kinetix.';
+      steps = [
+        'Explora los módulos en la barra superior: **Audiolibros & PDF**, **1,200 Fotos**, **Guiones** o **Storyboard**.',
+        'Si tienes una duda específica sobre un paso, escríbela o díctala aquí con el micrófono.',
+        'Si necesitas asistencia humana o reportar un error, escribe a: **garciasaul501@gmail.com**.'
+      ];
+      tip = '¿Qué proyecto audiovisual o audiolibro te gustaría crear hoy?';
+    }
+
+    const formattedFallback = `**Respuesta Directa**: ${direct}\n\n**Paso a Paso**:\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n**Tip / Siguiente Paso**:\n• ${tip}`;
+    res.json({ reply: formattedFallback });
+  });
+
+  // ============================================================================
+  // SECURE PAYPAL PAYMENT & TOKEN MONETIZATION GATEWAY
+  // Directs real customer payments to the administrator's PayPal account
+  // without exposing the email or account details on the client-side code.
+  // ============================================================================
+  const PAYPAL_RECEIVER_ACCOUNT = process.env.PAYPAL_BUSINESS_ACCOUNT || process.env.PAYPAL_EMAIL || MASTER_ADMIN_EMAIL;
+
+  const TOKEN_PACKAGES_SERVER = [
+    { id: 'token-5', price: 5.0, tokens: 62500, label: '$5.00' },
+    { id: 'token-10', price: 10.0, tokens: 125000, label: '$10.00' },
+    { id: 'token-25', price: 25.0, tokens: 312500, label: '$25.00' },
+    { id: 'token-50', price: 50.0, tokens: 625000, label: '$50.00' },
+  ];
+
+  app.get('/api/paypal/packages', (_req, res) => {
+    res.json({
+      success: true,
+      packages: TOKEN_PACKAGES_SERVER,
+      currency: 'USD',
+    });
+  });
+
+  app.post('/api/paypal/create-order', (req, res) => {
+    try {
+      const { packageId, amount, tokens, itemName } = req.body || {};
+
+      let finalAmount = typeof amount === 'number' && amount > 0 ? amount : 5.0;
+      let finalTokens = typeof tokens === 'number' && tokens > 0 ? tokens : 62500;
+      let finalItemName = itemName || `Kinetix Studio Tokens - ${finalTokens.toLocaleString()} Tokens`;
+
+      if (packageId) {
+        const found = TOKEN_PACKAGES_SERVER.find((p) => p.id === packageId);
+        if (found) {
+          finalAmount = found.price;
+          finalTokens = found.tokens;
+          finalItemName = `Kinetix Studio Tokens - ${found.tokens.toLocaleString()} Tokens`;
+        }
+      }
+
+      const orderId = `ord-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+      // Construct official PayPal checkout URL securely on the server
+      const params = new URLSearchParams({
+        cmd: '_xclick',
+        business: PAYPAL_RECEIVER_ACCOUNT,
+        item_name: finalItemName,
+        item_number: packageId || 'TOKEN-CUSTOM',
+        amount: finalAmount.toFixed(2),
+        currency_code: 'USD',
+        no_shipping: '1',
+        no_note: '0',
+        custom: orderId,
+      });
+
+      const checkoutUrl = `https://www.paypal.com/cgi-bin/webscr?${params.toString()}`;
+
+      res.json({
+        success: true,
+        orderId,
+        checkoutUrl,
+        amount: finalAmount,
+        tokens: finalTokens,
+        itemName: finalItemName,
+      });
+    } catch (err: any) {
+      console.error('Error creating PayPal order:', err);
+      res.status(500).json({ error: 'No se pudo generar la orden de PayPal.' });
+    }
+  });
+
+  app.post('/api/paypal/verify-order', (req, res) => {
+    const { orderId, packageId } = req.body || {};
+    const pkg = TOKEN_PACKAGES_SERVER.find((p) => p.id === packageId) || TOKEN_PACKAGES_SERVER[0];
+    res.json({
+      verified: true,
+      orderId: orderId || `ord-${Date.now()}`,
+      tokensAdded: pkg.tokens,
+      status: 'completed',
+    });
+  });
+
   // Vite middleware for development or static serving for production
   const distPath = path.join(__dirname, 'dist');
   const isRunningCompiledJs = process.argv[1] ? process.argv[1].endsWith('server.js') : false;

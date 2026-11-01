@@ -359,31 +359,31 @@ export async function renderVideoBookToMp4Url(
         bookY + bookH - 28
       );
 
-      // Right Page: Spoken Audiobook Text & Synchronized Reading Page
+      // Right Page: Spoken Audiobook Text & Synchronized Reading Page (Negro, Blanco y Neón Ultra Contraste)
       const rightX = bookX + halfW;
-      ctx.fillStyle = '#12151E';
+      ctx.fillStyle = '#05070B';
       ctx.fillRect(rightX, bookY, halfW, bookH);
 
       // Center Book Spine Crease Shadow
       const spineGrad = ctx.createLinearGradient(rightX - 18, 0, rightX + 24, 0);
-      spineGrad.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
-      spineGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.85)');
+      spineGrad.addColorStop(0, 'rgba(0, 0, 0, 0.7)');
+      spineGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.95)');
       spineGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = spineGrad;
       ctx.fillRect(rightX - 18, bookY, 42, bookH);
 
-      // Book Outer Border
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.14)';
-      ctx.lineWidth = 1.5;
+      // Book Outer Border with Electric Neon Gold Glow
+      ctx.strokeStyle = '#FBBF24';
+      ctx.lineWidth = 2.5;
       ctx.strokeRect(bookX, bookY, bookW, bookH);
 
       const padX = 44;
       const textStartX = rightX + padX;
       const maxTextW = halfW - padX * 2;
 
-      // Top Audiobook Title Header
-      ctx.fillStyle = '#9CA3AF';
-      ctx.font = '600 11px "JetBrains Mono", monospace';
+      // Top Audiobook Title Header in Crisp Pure White
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '700 12px "JetBrains Mono", monospace';
       ctx.fillText(
         (book.bookTitle || 'AUDIOLIBRO IA EN VIDEO').toUpperCase().slice(0, 44),
         textStartX,
@@ -391,7 +391,7 @@ export async function renderVideoBookToMp4Url(
       );
 
       ctx.textAlign = 'right';
-      ctx.fillStyle = `rgb(${ra}, ${ga}, ${ba})`;
+      ctx.fillStyle = '#FBBF24';
       ctx.fillText(
         `CAP. ${pageIdx + 1} / ${pageCount}`,
         rightX + halfW - padX,
@@ -399,24 +399,20 @@ export async function renderVideoBookToMp4Url(
       );
       ctx.textAlign = 'left';
 
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.strokeStyle = 'rgba(251, 191, 36, 0.35)';
       ctx.beginPath();
       ctx.moveTo(textStartX, bookY + 56);
       ctx.lineTo(rightX + halfW - padX, bookY + 56);
       ctx.stroke();
 
-      // Chapter Title in Modern 24K Gold Letters
-      if (visualOptions?.goldTypography !== false) {
-        const titleGrad = ctx.createLinearGradient(textStartX, 0, textStartX + 320, 0);
-        titleGrad.addColorStop(0, '#FFFBEB');
-        titleGrad.addColorStop(0.3, '#FDE68A');
-        titleGrad.addColorStop(0.7, '#F59E0B');
-        titleGrad.addColorStop(1, '#D97706');
-        ctx.fillStyle = titleGrad;
-      } else {
-        ctx.fillStyle = '#F9FAFB';
-      }
-      ctx.font = '700 24px "Syne", sans-serif';
+      // Chapter Title in Neon Gold with White Highlight
+      const titleGrad = ctx.createLinearGradient(textStartX, 0, textStartX + 320, 0);
+      titleGrad.addColorStop(0, '#FFFFFF');
+      titleGrad.addColorStop(0.3, '#FFFBEB');
+      titleGrad.addColorStop(0.7, '#FBBF24');
+      titleGrad.addColorStop(1, '#F59E0B');
+      ctx.fillStyle = titleGrad;
+      ctx.font = '800 24px "Syne", sans-serif';
       const titleLines = wrapCanvasLines(
         ctx,
         page?.chapterTitle || `Capítulo ${pageIdx + 1}`,
@@ -431,8 +427,7 @@ export async function renderVideoBookToMp4Url(
 
       cursorY += 12;
 
-      // Main Page Body Text (with synchronized spoken highlight bar in gold)
-      ctx.font = '400 16.5px "Plus Jakarta Sans", sans-serif';
+      // Main Page Body Text: Ultra-crisp pure white with electric neon highlight bar
       const bodyLines = wrapCanvasLines(ctx, page?.pageText || '', maxTextW, 9);
       const activeLineIdx = Math.min(
         bodyLines.length - 1,
@@ -441,32 +436,40 @@ export async function renderVideoBookToMp4Url(
 
       bodyLines.forEach((bLine, lIdx) => {
         if (lIdx === activeLineIdx) {
-          ctx.fillStyle = visualOptions?.goldTypography !== false ? 'rgba(245, 158, 11, 0.25)' : `rgba(${ra}, ${ga}, ${ba}, 0.16)`;
+          // Electric Neon highlight bar
+          ctx.fillStyle = 'rgba(251, 191, 36, 0.28)';
           ctx.fillRect(textStartX - 8, cursorY - 19, maxTextW + 16, 26);
-          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#FFFBEB' : '#FFFFFF';
+          // Neon left accent bar
+          ctx.fillStyle = '#FBBF24';
+          ctx.fillRect(textStartX - 8, cursorY - 19, 4, 26);
+          // Pure white active text
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '700 17px "Plus Jakarta Sans", sans-serif';
         } else if (lIdx < activeLineIdx) {
-          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#FDE68A' : '#D1D5DB';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = '500 16.5px "Plus Jakarta Sans", sans-serif';
         } else {
-          ctx.fillStyle = visualOptions?.goldTypography !== false ? '#F59E0B' : '#9CA3AF';
+          ctx.fillStyle = '#E2E8F0';
+          ctx.font = '400 16.5px "Plus Jakarta Sans", sans-serif';
         }
         ctx.fillText(bLine, textStartX, cursorY);
         cursorY += 28;
       });
 
-      // Futuristic Gold Logo Watermark Badge
+      // Futuristic Gold & Neon Watermark Badge
       ctx.save();
       const wmX = width - 215;
       const wmY = 16;
-      ctx.fillStyle = 'rgba(10, 12, 18, 0.88)';
-      ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
-      ctx.lineWidth = 1.2;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+      ctx.strokeStyle = '#FBBF24';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.roundRect(wmX, wmY, 198, 34, 10);
       ctx.fill();
       ctx.stroke();
 
       // Golden diamond core
-      ctx.fillStyle = '#F59E0B';
+      ctx.fillStyle = '#FBBF24';
       ctx.beginPath();
       ctx.moveTo(wmX + 18, wmY + 10);
       ctx.lineTo(wmX + 24, wmY + 17);
@@ -475,24 +478,27 @@ export async function renderVideoBookToMp4Url(
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = '#FFF6CC';
+      ctx.fillStyle = '#FFFFFF';
       ctx.font = '900 11.5px "Syne", sans-serif';
       ctx.fillText('KINETIX', wmX + 30, wmY + 21);
       ctx.fillStyle = '#FBBF24';
       ctx.font = '700 9px "JetBrains Mono", monospace';
-      ctx.fillText('AI 2050 · ORO', wmX + 88, wmY + 21);
+      ctx.fillText('AI 2050 · NEÓN', wmX + 88, wmY + 21);
       ctx.restore();
 
-      // Key Quote Callout Box at bottom of Right Page
+      // Key Quote Callout Box at bottom of Right Page (Negro, Neón Oro y Letras Blancas)
       if (page?.keyQuote) {
         const quoteY = bookY + bookH - 108;
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.09)';
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
         ctx.fillRect(textStartX, quoteY, maxTextW, 64);
-        ctx.fillStyle = `rgb(${ra}, ${ga}, ${ba})`;
+        ctx.strokeStyle = '#FBBF24';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(textStartX, quoteY, maxTextW, 64);
+        ctx.fillStyle = '#FBBF24';
         ctx.fillRect(textStartX, quoteY, 4, 64);
 
-        ctx.fillStyle = '#FDE68A';
-        ctx.font = '600 13px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '700 13px "Plus Jakarta Sans", sans-serif';
         const qLines = wrapCanvasLines(ctx, `“${page.keyQuote}”`, maxTextW - 24, 2);
         qLines.forEach((ql, qi) => {
           ctx.fillText(ql, textStartX + 14, quoteY + 25 + qi * 20);

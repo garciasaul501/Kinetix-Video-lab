@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Play, Pause, Download, RotateCcw, Music, Loader2, Check } from 'lucide-react';
+import { Play, Pause, Download, RotateCcw, Music, Loader2, Check, Heart } from 'lucide-react';
 import { formatTimecode } from '../utils/audioWav';
 import { downloadAudioAsMp3 } from '../utils/videoRenderer';
 
@@ -17,13 +17,15 @@ export interface VoiceoverTake {
   audioBase64?: string;
   durationSec: number;
   peaks: number[];
+  isFavorite?: boolean;
 }
 
 interface StudioAudioPlayerProps {
   take: VoiceoverTake;
+  onToggleFavorite?: (takeId: string) => void;
 }
 
-export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take }) => {
+export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take, onToggleFavorite }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -135,6 +137,28 @@ export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take }) =>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(take.id)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border transition-all cursor-pointer ${
+                take.isFavorite
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 hover:bg-rose-500/30 shadow-[0_0_12px_rgba(244,63,94,0.3)]'
+                  : 'bg-[#181B22] border-white/10 text-slate-300 hover:text-white hover:border-white/20'
+              }`}
+              title={take.isFavorite ? 'Quitar de tomas favoritas' : 'Marcar toma como favorita'}
+            >
+              <Heart
+                className={`w-3.5 h-3.5 transition-transform ${
+                  take.isFavorite
+                    ? 'fill-rose-500 text-rose-500 scale-110'
+                    : 'text-slate-400 group-hover:text-rose-400'
+                }`}
+              />
+              <span>{take.isFavorite ? 'Favorita ❤️' : 'Favorito'}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleDownloadMp3}

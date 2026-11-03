@@ -15,7 +15,7 @@ export const FuturisticGoldLogo: React.FC<FuturisticGoldLogoProps> = ({
   showWordmark = true,
   animated = true,
   className = '',
-  subText = 'QUANTUM AUDIO & VIDEO · 2050',
+  subText = 'ESTUDIO AUDIOVISUAL & LOCUCIÓN IA',
   onClick,
 }) => {
   const [copied, setCopied] = useState(false);
@@ -34,7 +34,7 @@ export const FuturisticGoldLogo: React.FC<FuturisticGoldLogoProps> = ({
 
   const handleCopyBadge = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText('KINETIX QUANTUM 2050 · AI VIDEO & AUDIO LAB');
+    navigator.clipboard.writeText('KINETIX ESTUDIO IA');
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -175,12 +175,9 @@ export const FuturisticGoldLogo: React.FC<FuturisticGoldLogoProps> = ({
           <div className="flex flex-col text-left">
             <div className="flex items-center gap-2">
               <span
-                className={`font-display font-extrabold tracking-wider bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)] ${dim.text}`}
+                className={`font-display font-black tracking-wider bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)] ${dim.text}`}
               >
-                KINETIX
-              </span>
-              <span className="px-1.5 py-0.5 rounded-sm bg-gradient-to-r from-amber-500/20 to-yellow-500/10 border border-amber-400/40 text-[9px] font-mono font-black text-amber-300 uppercase tracking-widest">
-                AI 2050
+                KINETIX ESTUDIO IA
               </span>
             </div>
             <span
@@ -219,7 +216,7 @@ export const FuturisticLogoModal: React.FC<{
     const svgUrl = URL.createObjectURL(svgBlob);
     const downloadLink = document.createElement('a');
     downloadLink.href = svgUrl;
-    downloadLink.download = 'kinetix-futuristic-gold-logo-2050.svg';
+    downloadLink.download = 'kinetix-estudio-ia-logo.svg';
     document.body.appendChild(downloadLink);
     downloadLink.click();
     document.body.removeChild(downloadLink);
@@ -272,28 +269,28 @@ export const FuturisticLogoModal: React.FC<{
 
         // Futuristic Brand Typography in Gold
         ctx.textAlign = 'center';
-        ctx.font = '900 68px "Syne", sans-serif';
-        const textGrad = ctx.createLinearGradient(300, 0, 724, 0);
+        ctx.font = '900 64px "Syne", sans-serif';
+        const textGrad = ctx.createLinearGradient(260, 0, 764, 0);
         textGrad.addColorStop(0, '#FFF6CC');
         textGrad.addColorStop(0.5, '#F5B738');
         textGrad.addColorStop(1, '#D97706');
         ctx.fillStyle = textGrad;
-        ctx.fillText('KINETIX', 512, 790);
+        ctx.fillText('KINETIX ESTUDIO IA', 512, 790);
 
         ctx.font = '700 24px "JetBrains Mono", monospace';
         ctx.fillStyle = '#FDE68A';
         ctx.letterSpacing = '6px';
-        ctx.fillText('QUANTUM AUDIO & VIDEO STUDIO · 2050', 512, 840);
+        ctx.fillText('ESTUDIO AUDIOVISUAL & LOCUCIÓN IA', 512, 840);
 
         ctx.font = '500 16px "Plus Jakarta Sans", sans-serif';
         ctx.fillStyle = '#B45309';
         ctx.letterSpacing = '2px';
-        ctx.fillText('VIRAL ICONIC BRAND IDENTITY · 24K LIQUID GOLD', 512, 880);
+        ctx.fillText('IDENTIDAD OFICIAL · 24K LIQUID GOLD', 512, 880);
 
         const pngUrl = canvas.toDataURL('image/png');
         const dlLink = document.createElement('a');
         dlLink.href = pngUrl;
-        dlLink.download = 'kinetix-futuristic-gold-logo-4k.png';
+        dlLink.download = 'kinetix-estudio-ia-logo-4k.png';
         document.body.appendChild(dlLink);
         dlLink.click();
         document.body.removeChild(dlLink);
@@ -321,10 +318,10 @@ export const FuturisticLogoModal: React.FC<{
             </div>
             <div>
               <h3 className="font-display text-xl font-black bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent">
-                Logotipo Futurista Viral Kinetix 2050
+                KINETIX ESTUDIO IA
               </h3>
               <p className="text-xs font-mono text-amber-300/80">
-                Identidad Visual en Oro 24K · Vector SVG & PNG 4K
+                Logotipo & Identidad Visual en Oro 24K · Vector SVG & PNG 4K
               </p>
             </div>
           </div>
@@ -429,10 +426,10 @@ export const FuturisticLogoModal: React.FC<{
 
           <div className="relative z-10 text-center mt-5 space-y-1">
             <h2 className="font-display text-3xl font-black tracking-widest bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent">
-              KINETIX
+              KINETIX ESTUDIO IA
             </h2>
             <div className="font-mono text-xs font-bold text-amber-300 tracking-[0.25em] uppercase">
-              Quantum Video AI · Next Gen 2050
+              Estudio Audiovisual Inteligente · Voces & Video
             </div>
           </div>
         </div>

@@ -118,3 +118,27 @@ export function formatTimecode(seconds: number): string {
   const tenths = Math.floor((seconds % 1) * 10);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${tenths}`;
 }
+
+export function createSyntheticToneWav(
+  durationSec = 6,
+  freq = 220
+): ProcessedAudioResult {
+  const sampleRate = 24000;
+  const numSamples = Math.floor(sampleRate * durationSec);
+  const pcmBytes = new Int16Array(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const env =
+      Math.min(1, t / 0.4) * Math.min(1, Math.max(0, (durationSec - t) / 0.6));
+    const sampleVal =
+      Math.sin(2 * Math.PI * freq * t) * 0.45 +
+      Math.sin(2 * Math.PI * (freq * 1.5) * t) * 0.25;
+    pcmBytes[i] = Math.round(sampleVal * env * 20000);
+  }
+  const uint8 = new Uint8Array(pcmBytes.buffer);
+  let binary = '';
+  for (let j = 0; j < uint8.byteLength; j++) {
+    binary += String.fromCharCode(uint8[j]);
+  }
+  return pcmBase64ToWav(btoa(binary), sampleRate);
+}

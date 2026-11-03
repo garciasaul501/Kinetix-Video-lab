@@ -33,8 +33,10 @@ import {
   ShoppingBag,
   ShieldCheck,
   HelpCircle,
+  Heart,
+  LogIn,
 } from 'lucide-react';
-import { pcmBase64ToWav } from './utils/audioWav';
+import { pcmBase64ToWav, createSyntheticToneWav } from './utils/audioWav';
 import {
   renderSequenceToVideoUrl,
   downloadAudioAsMp3,
@@ -106,6 +108,8 @@ import {
 import { SupportConciergeModal } from './components/SupportConciergeModal';
 import { ProposalSeoEditor } from './components/ProposalSeoEditor';
 import { BuyTokensModal } from './components/BuyTokensModal';
+import { UnifiedActionToolbar } from './components/UnifiedActionToolbar';
+import { SocialShareModal } from './components/SocialShareModal';
 
 type ActiveModule = StudioModuleId;
 
@@ -587,6 +591,73 @@ const INITIAL_VIDEO_BOOK: VideoBook = {
   ],
 };
 
+function loadInitialVoiceTakes(): VoiceoverTake[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem('kinetix_voiceover_takes_v2');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map((take: VoiceoverTake) => {
+          if (!take.wavUrl && typeof window !== 'undefined') {
+            const tone = createSyntheticToneWav(take.durationSec || 6, 240);
+            return { ...take, wavUrl: tone.wavUrl, peaks: take.peaks || tone.peaks };
+          }
+          return take;
+        });
+      }
+    }
+  } catch (_e) {
+    // fallback
+  }
+
+  const tone1 = typeof window !== 'undefined' ? createSyntheticToneWav(7.5, 260) : { wavUrl: '', peaks: [] };
+  const tone2 = typeof window !== 'undefined' ? createSyntheticToneWav(6.2, 210) : { wavUrl: '', peaks: [] };
+
+  const initialTakes: VoiceoverTake[] = [
+    {
+      id: 'take-101',
+      createdAt: '11:20:00',
+      scriptExcerpt: 'Bienvenido a Kinetix Estudio IA: la síntesis entre voz humana expresiva y dirección...',
+      fullScript:
+        'Bienvenido a Kinetix Estudio IA: la síntesis entre voz humana expresiva y dirección audiovisual moderna. Cada narración está diseñada con acento natural, micro-inflexiones y masterización a 24 kHz.',
+      voiceGender: 'femenina',
+      voiceName: 'Kore',
+      accent: 'español neutro latinoamericano',
+      tone: 'cinematográfico, cálido y envolvente',
+      executedPrompt: 'Voz femenina Kore, tono cálido y cinematográfico',
+      wavUrl: tone1.wavUrl,
+      durationSec: 7.5,
+      peaks: tone1.peaks,
+      isFavorite: true,
+    },
+    {
+      id: 'take-102',
+      createdAt: '10:45:12',
+      scriptExcerpt: 'En cada documento PDF habita un audiolibro completo esperando cobrar vida...',
+      fullScript:
+        'En cada documento PDF habita un audiolibro completo esperando cobrar vida. La inteligencia artificial no sustituye al narrador, sino que magnifica su alcance en tiempo récord.',
+      voiceGender: 'masculina',
+      voiceName: 'Charon',
+      accent: 'español neutro',
+      tone: 'profesional e informativo',
+      executedPrompt: 'Voz masculina Charon, documental y profundo',
+      wavUrl: tone2.wavUrl,
+      durationSec: 6.2,
+      peaks: tone2.peaks,
+      isFavorite: false,
+    },
+  ];
+
+  try {
+    window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(initialTakes));
+  } catch (_e) {
+    // ignore
+  }
+
+  return initialTakes;
+}
+
 export default function App() {
   const [activeModule, setActiveModule] = useState<ActiveModule>('videobook');
   const [targetChaptersCount, setTargetChaptersCount] = useState<number>(8);
@@ -691,8 +762,28 @@ export default function App() {
   const [voiceTone, setVoiceTone] = useState<string>('cinematográfico, cálido y envolvente');
   const [isGeneratingNarration, setIsGeneratingNarration] = useState<boolean>(false);
   const [narrationError, setNarrationError] = useState<string | null>(null);
-  const [voiceTakes, setVoiceTakes] = useState<VoiceoverTake[]>([]);
-  const [activeTakeId, setActiveTakeId] = useState<string | null>(null);
+  const [voiceTakes, setVoiceTakes] = useState<VoiceoverTake[]>(() =>
+    loadInitialVoiceTakes()
+  );
+  const [activeTakeId, setActiveTakeId] = useState<string | null>(() => {
+    const initial = loadInitialVoiceTakes();
+    return initial[0]?.id || null;
+  });
+  const [voiceFilterTab, setVoiceFilterTab] = useState<'all' | 'favorites'>('all');
+
+  const handleToggleTakeFavorite = (takeId: string) => {
+    setVoiceTakes((prev) => {
+      const next = prev.map((t) =>
+        t.id === takeId ? { ...t, isFavorite: !t.isFavorite } : t
+      );
+      try {
+        window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(next));
+      } catch (_e) {
+        // ignore
+      }
+      return next;
+    });
+  };
 
   // --- MODULE 3: VISUAL SEQUENCE & VEO 3.1 STATE ---
   const [sceneEmotionDesc, setSceneEmotionDesc] = useState<string>(
@@ -1577,9 +1668,16 @@ ${textoPdf || '{{texto_pdf}}'}
         audioBase64: data.audioBase64,
         durationSec: processed.durationSec,
         peaks: processed.peaks,
+        isFavorite: false,
       };
 
-      setVoiceTakes((prev) => [newTake, ...prev]);
+      setVoiceTakes((prev) => {
+        const next = [newTake, ...prev];
+        try {
+          window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(next));
+        } catch (_e) {}
+        return next;
+      });
       setActiveTakeId(newTake.id);
 
       if (data.quotaFallback && typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -1980,6 +2078,7 @@ ${textoPdf || '{{texto_pdf}}'}
   const [isViralLogoModalOpen, setIsViralLogoModalOpen] = useState(false);
   const [isSupportConciergeOpen, setIsSupportConciergeOpen] = useState(false);
   const [isBuyTokensModalOpen, setIsBuyTokensModalOpen] = useState(false);
+  const [isSocialShareModalOpen, setIsSocialShareModalOpen] = useState(false);
   const [userTokenBalance, setUserTokenBalance] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('kinetix_user_tokens');
@@ -1988,6 +2087,59 @@ ${textoPdf || '{{texto_pdf}}'}
       return 62500;
     }
   });
+
+  // Action Handlers for Unified Action Toolbar
+  const handleToolbarCrear = () => {
+    setActiveModule('videobook');
+    setTimeout(() => {
+      const stage = document.getElementById('audiobook-creation-stage');
+      if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+    }, 80);
+  };
+
+  const handleToolbarReproducir = () => {
+    setActiveModule('videobook');
+    setTimeout(() => {
+      const player = document.getElementById('audiobook-master-player');
+      if (player) {
+        player.scrollIntoView({ behavior: 'smooth' });
+      } else {
+        const stage = document.getElementById('audiobook-creation-stage');
+        if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 80);
+  };
+
+  const handleToolbarCargar = () => {
+    setActiveModule('videobook');
+    setTimeout(() => {
+      const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (fileInput) {
+        fileInput.click();
+      } else {
+        const stage = document.getElementById('audiobook-creation-stage');
+        if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 80);
+  };
+
+  const handleToolbarEliminar = () => {
+    setTextoPdf('');
+    setUploadedPdfName(null);
+  };
+
+  const handleToolbarCompartir = () => {
+    setIsSocialShareModalOpen(true);
+  };
+
+  const handleToolbarConvertir = () => {
+    setActiveModule('videobook');
+    if (textoPdf.trim()) {
+      handleCreateVideoBookFromPdf(false);
+    } else {
+      handleExportVideoBookMp4();
+    }
+  };
 
   const handleTokensPurchased = (tokensToAdd: number, _amountPaid: number, _packageName: string) => {
     setUserTokenBalance((prev) => {
@@ -2067,6 +2219,21 @@ ${textoPdf || '{{texto_pdf}}'}
               showWordmark={true}
               onClick={() => setIsViralLogoModalOpen(true)}
             />
+            {/* Botón Entrar Ahora Destacado en Header */}
+            <button
+              type="button"
+              onClick={() => {
+                const target =
+                  document.getElementById('studio-main-workspace') ||
+                  document.querySelector('main');
+                if (target) target.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-[0_0_18px_rgba(245,158,11,0.45)] hover:shadow-[0_0_26px_rgba(245,158,11,0.7)] transition-all cursor-pointer transform hover:scale-105"
+              title="Entrar ahora a la consola de creación"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Entrar Ahora</span>
+            </button>
           </div>
 
           {/* Ultra-Modern Segmented Navigation with Clear Readable Typography */}
@@ -2236,6 +2403,16 @@ ${textoPdf || '{{texto_pdf}}'}
 
             <button
               type="button"
+              onClick={() => setIsSocialShareModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.35)] hover:shadow-[0_0_22px_rgba(245,158,11,0.5)] transition-all cursor-pointer"
+              title="Compartir directo a redes sociales y generar tráfico orgánico"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+              <span>🚀 Compartir</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveModule('paypal-monetization')}
               className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all cursor-pointer"
             >
@@ -2269,6 +2446,20 @@ ${textoPdf || '{{texto_pdf}}'}
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Botón Entrar Ahora en Banner de Módulo */}
+            <button
+              type="button"
+              onClick={() => {
+                const target = document.getElementById('studio-main-workspace');
+                if (target) target.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-950 hover:bg-amber-500 hover:text-slate-950 text-white font-black text-xs flex items-center gap-1.5 border border-amber-400/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
+              title="Entrar ahora a este módulo de trabajo"
+            >
+              <span>Entrar Ahora</span>
+              <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
+            </button>
+
             <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-extrabold flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-emerald-600" />
               <span>Videos Sin Límite de Tiempo</span>
@@ -2281,7 +2472,23 @@ ${textoPdf || '{{texto_pdf}}'}
       </div>
 
       {/* Main Studio Workspace */}
-      <main className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-8">
+      <main id="studio-main-workspace" className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-8">
+        {/* Barra Unificada Siempre al Principio: Monetización Real + 6 Acciones Core Juntas */}
+        <div className="mb-8">
+          <UnifiedActionToolbar
+            onCrear={handleToolbarCrear}
+            onReproducir={handleToolbarReproducir}
+            onCargar={handleToolbarCargar}
+            onEliminar={handleToolbarEliminar}
+            onCompartir={handleToolbarCompartir}
+            onConvertir={handleToolbarConvertir}
+            onMonetizar={() => setIsBuyTokensModalOpen(true)}
+            onTestearPago={() => setIsBuyTokensModalOpen(true)}
+            userTokenBalance={userTokenBalance}
+            isGenerating={isGeneratingVideoBook || isExportingBookMp4}
+          />
+        </div>
+
         {/* =====================================================================
             MODULE: 1,200 FOTOS DE ESCENAS POR NICHOS (FULL GALLERY VIEW)
            ===================================================================== */}
@@ -2408,8 +2615,20 @@ ${textoPdf || '{{texto_pdf}}'}
                   </p>
                 </div>
 
-                {/* Quick Actions: 1,200 Photos + Folder Toggle + Subscribe */}
+                {/* Quick Actions: Entrar Ahora + 1,200 Photos + Folder Toggle + Subscribe */}
                 <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const stage = document.getElementById('audiobook-creation-stage');
+                      if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black shadow-[0_0_15px_rgba(245,158,11,0.35)] flex items-center gap-1.5 transition-all cursor-pointer transform hover:scale-105"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Entrar Ahora a Crear</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => setActiveModule('niche-gallery')}
@@ -2551,7 +2770,7 @@ ${textoPdf || '{{texto_pdf}}'}
               </div>
 
               {/* 3 Simple Columns: Paso 1 (PDF) | Paso 2 (Avatar, Duración Sin Límite y Escenas) | Paso 3 (Crear y Suscribirse) */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+              <div id="audiobook-creation-stage" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
                 {/* PASO 1: Subir PDF o Texto (Soporta múltiples PDFs) */}
                 <div className="lg:col-span-5 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
                   <div className="space-y-3">
@@ -2919,7 +3138,8 @@ ${textoPdf || '{{texto_pdf}}'}
             )}
 
             {/* Interactive Spoken Audiobook & Video-eBook Stage with Talking Avatar + 1,200 Topic Scenes + Unlimited Chapters */}
-            <VideoBookPlayer
+            <div id="audiobook-master-player">
+              <VideoBookPlayer
               videoBook={videoBook}
               onAddUnlimitedChapter={() => {
                 setVideoBook((prev) => {
@@ -3016,6 +3236,7 @@ ${textoPdf || '{{texto_pdf}}'}
                 )
               }
             />
+            </div>
           </div>
         )}
 
@@ -4940,7 +5161,10 @@ ${textoPdf || '{{texto_pdf}}'}
             <section className="lg:col-span-6 flex flex-col gap-6">
               {activeTake ? (
                 <>
-                  <StudioAudioPlayer take={activeTake} />
+                  <StudioAudioPlayer
+                    take={activeTake}
+                    onToggleFavorite={handleToggleTakeFavorite}
+                  />
 
                   <div className="flex items-center justify-between bg-[#111318] border border-white/8 rounded-lg p-4">
                     <div className="text-xs text-slate-300">
@@ -5005,35 +5229,172 @@ ${textoPdf || '{{texto_pdf}}'}
                 </div>
               </div>
 
-              {/* Recorded Voice Takes History */}
-              {voiceTakes.length > 1 && (
-                <div className="bg-[#111318] border border-white/8 rounded-xl p-5 flex flex-col gap-3">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Historial de Tomas de Locución ({voiceTakes.length})
-                  </h3>
-                  <div className="flex flex-col gap-2">
-                    {voiceTakes.map((t) => (
+              {/* Recorded Voice Takes History & Favorites Section */}
+              {voiceTakes.length > 0 && (
+                <div className="bg-[#111318] border border-white/8 rounded-xl p-5 flex flex-col gap-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 pb-3">
+                    <div>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                        <span>Historial de Tomas de Locución</span>
+                        <span className="px-1.5 py-0.5 rounded bg-white/10 text-[10px] font-mono text-amber-300">
+                          {voiceTakes.length} tomas
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Guarda tus tomas preferidas con el corazón ❤️ para encontrarlas rápidamente.
+                      </p>
+                    </div>
+
+                    {/* Filter Tabs: Todas vs Favoritos */}
+                    <div className="inline-flex items-center p-1 rounded-lg bg-[#0A0B0E] border border-white/10">
                       <button
-                        key={t.id}
                         type="button"
-                        onClick={() => setActiveTakeId(t.id)}
-                        className={`p-3 rounded-lg border text-left transition-colors flex items-center justify-between gap-3 cursor-pointer ${
-                          t.id === activeTake?.id
-                            ? 'bg-amber-500/10 border-amber-500/40 text-white'
-                            : 'bg-[#0A0B0E] border-white/6 text-slate-400 hover:text-white'
+                        onClick={() => setVoiceFilterTab('all')}
+                        className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          voiceFilterTab === 'all'
+                            ? 'bg-amber-500 text-slate-950 shadow-xs font-black'
+                            : 'text-slate-400 hover:text-white'
                         }`}
                       >
-                        <div className="truncate text-xs">
-                          <span className="font-mono text-amber-400 mr-2">#{t.id}</span>
-                          <span className="font-medium text-slate-200">{t.voiceName}</span> ·{' '}
-                          <span>{t.accent}</span> — “{t.scriptExcerpt}”
-                        </div>
-                        <span className="font-mono text-xs text-slate-400 shrink-0 tabular-nums">
-                          {t.durationSec.toFixed(1)}s
-                        </span>
+                        Todas ({voiceTakes.length})
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() => setVoiceFilterTab('favorites')}
+                        className={`px-3 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                          voiceFilterTab === 'favorites'
+                            ? 'bg-rose-500 text-white shadow-xs font-black'
+                            : 'text-slate-400 hover:text-rose-300'
+                        }`}
+                      >
+                        <Heart
+                          className={`w-3.5 h-3.5 ${
+                            voiceFilterTab === 'favorites' ? 'fill-current' : 'text-rose-400'
+                          }`}
+                        />
+                        <span>Favoritos ({voiceTakes.filter((t) => t.isFavorite).length})</span>
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Takes List */}
+                  {(() => {
+                    const favoriteTakes = voiceTakes.filter((t) => t.isFavorite);
+                    const displayed =
+                      voiceFilterTab === 'favorites' ? favoriteTakes : voiceTakes;
+
+                    if (displayed.length === 0 && voiceFilterTab === 'favorites') {
+                      return (
+                        <div className="p-8 rounded-xl bg-[#0A0B0E] border border-dashed border-rose-500/30 text-center flex flex-col items-center justify-center gap-2">
+                          <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                            <Heart className="w-5 h-5 text-rose-400" />
+                          </div>
+                          <div className="text-sm font-semibold text-slate-200">
+                            Aún no tienes tomas favoritas guardadas
+                          </div>
+                          <p className="text-xs text-slate-400 max-w-sm">
+                            Haz clic en el icono de corazón en cualquier toma de locución para guardarla y acceder a ella rápidamente en esta sección.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setVoiceFilterTab('all')}
+                            className="mt-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-slate-200 cursor-pointer"
+                          >
+                            Ver todas las tomas ({voiceTakes.length})
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="flex flex-col gap-2">
+                        {displayed.map((t) => {
+                          const isCurrentActive = t.id === activeTake?.id;
+                          return (
+                            <div
+                              key={t.id}
+                              onClick={() => setActiveTakeId(t.id)}
+                              className={`p-3 rounded-lg border transition-all flex items-center justify-between gap-3 cursor-pointer group ${
+                                isCurrentActive
+                                  ? 'bg-amber-500/10 border-amber-500/40 text-white shadow-xs'
+                                  : t.isFavorite
+                                  ? 'bg-rose-500/[0.04] border-rose-500/30 text-slate-300 hover:border-rose-500/50 hover:bg-rose-500/[0.08]'
+                                  : 'bg-[#0A0B0E] border-white/6 text-slate-400 hover:text-white hover:border-white/15'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3 min-w-0 flex-1">
+                                {/* Botón de Favorito con Icono de Corazón */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleTakeFavorite(t.id);
+                                  }}
+                                  className={`p-1.5 rounded-lg transition-all cursor-pointer shrink-0 ${
+                                    t.isFavorite
+                                      ? 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 hover:scale-110 shadow-xs'
+                                      : 'text-slate-500 hover:text-rose-400 hover:bg-white/5 hover:scale-110'
+                                  }`}
+                                  title={
+                                    t.isFavorite
+                                      ? 'Quitar toma de favoritos'
+                                      : 'Guardar toma como favorita'
+                                  }
+                                  aria-label={
+                                    t.isFavorite
+                                      ? 'Quitar toma de favoritos'
+                                      : 'Guardar toma como favorita'
+                                  }
+                                >
+                                  <Heart
+                                    className={`w-4 h-4 transition-transform ${
+                                      t.isFavorite
+                                        ? 'fill-rose-500 text-rose-500 scale-110'
+                                        : 'text-slate-500 group-hover:text-rose-400'
+                                    }`}
+                                  />
+                                </button>
+
+                                <div className="truncate text-xs flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-amber-400 font-bold">
+                                      #{t.id}
+                                    </span>
+                                    <span className="font-semibold text-slate-200">
+                                      {t.voiceName} ({t.voiceGender})
+                                    </span>
+                                    <span className="text-slate-400 hidden sm:inline">
+                                      · {t.accent}
+                                    </span>
+                                    {t.isFavorite && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                        Favorita ❤️
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-slate-400 truncate text-[11px] mt-0.5">
+                                    “{t.scriptExcerpt}”
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className="font-mono text-xs text-slate-400 tabular-nums">
+                                  {t.durationSec.toFixed(1)}s
+                                </span>
+                                {isCurrentActive && (
+                                  <span
+                                    className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+                                    title="Toma activa en máster"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </section>
@@ -5661,7 +6022,7 @@ ${textoPdf || '{{texto_pdf}}'}
           copied={false}
           onCopyBadge={(e) => {
             e.stopPropagation();
-            navigator.clipboard.writeText('KINETIX QUANTUM 2050 · AI VIDEO & AUDIO LAB');
+            navigator.clipboard.writeText('KINETIX ESTUDIO IA');
           }}
         />
       )}
@@ -5693,11 +6054,20 @@ ${textoPdf || '{{texto_pdf}}'}
         onTokensPurchased={handleTokensPurchased}
       />
 
+      {/* Social Share & Viral Traffic + Real PayPal Test Modal */}
+      <SocialShareModal
+        isOpen={isSocialShareModalOpen}
+        onClose={() => setIsSocialShareModalOpen(false)}
+        title={videoBook.bookTitle || 'KINETIX ESTUDIO IA'}
+        subtitle={videoBook.authorOrSource || videoBook.subtitle || 'Audiolibros, Guiones & Locución Neuronal'}
+        onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+      />
+
       {/* Quiet Studio Footer */}
       <footer className="border-t border-white/6 py-4 px-6 mt-12">
         <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
           <div>
-            Kinetix Video AI Lab · Dirección Audiovisual desde PDF, Storyboard IA, Locución Neuronal y Exportación MP4 / MP3
+            KINETIX ESTUDIO IA · Dirección Audiovisual desde PDF, Storyboard IA, Locución Neuronal y Exportación MP4 / MP3
           </div>
           <div className="flex items-center gap-4">
             <button

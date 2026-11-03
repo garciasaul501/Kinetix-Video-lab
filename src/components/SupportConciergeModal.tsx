@@ -52,13 +52,13 @@ const INITIAL_GREETING: SupportChatMessage = {
   id: 'msg-welcome-01',
   sender: 'assistant',
   text:
-    '**Respuesta Directa**: ¡Hola! Soy tu Asistente Oficial de Soporte y Onboarding de Kinetix Studio. Mi misión es guiarte paso a paso para que alcances valor con la plataforma en el menor tiempo posible.\n\n' +
+    '**Respuesta Directa**: ¡Hola! Soy tu Asistente Oficial de Soporte y Onboarding de Kinetix Estudio IA. Mi misión es guiarte paso a paso para que alcances valor con la plataforma en el menor tiempo posible.\n\n' +
     '**Paso a Paso**:\n' +
     '1. Selecciona una de las consultas rápidas de abajo o escribe/dicta tu duda con el micrófono.\n' +
-    '2. Te indicaré la ruta exacta en la interfaz (**Audiolibros & PDF**, **1,200 Fotos**, **Guiones**, etc.).\n' +
+    '2. Te indicaré la ruta exacta en la interfaz (**Audiolibros & PDF**, **1,200 Fotos**, **Guiones**, **Voces IA**, etc.).\n' +
     '3. Si necesitas soporte humano o asistencia prioritaria, cuento con canal directo de escalación (**garciasaul501@gmail.com**).\n\n' +
     '**Tip / Siguiente Paso**:\n' +
-    '• ¿Qué tarea o proyecto audiovisual deseas completar hoy en Kinetix?',
+    '• ¿Qué tarea o proyecto audiovisual deseas completar hoy en Kinetix Estudio IA?',
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
 };
 

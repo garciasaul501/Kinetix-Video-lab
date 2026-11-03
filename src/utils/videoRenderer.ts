@@ -482,8 +482,8 @@ export async function renderVideoBookToMp4Url(
       ctx.font = '900 11.5px "Syne", sans-serif';
       ctx.fillText('KINETIX', wmX + 30, wmY + 21);
       ctx.fillStyle = '#FBBF24';
-      ctx.font = '700 9px "JetBrains Mono", monospace';
-      ctx.fillText('AI 2050 · NEÓN', wmX + 88, wmY + 21);
+      ctx.font = '700 9.5px "JetBrains Mono", monospace';
+      ctx.fillText('ESTUDIO IA', wmX + 88, wmY + 21);
       ctx.restore();
 
       // Key Quote Callout Box at bottom of Right Page (Negro, Neón Oro y Letras Blancas)

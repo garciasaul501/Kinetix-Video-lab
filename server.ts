@@ -702,7 +702,17 @@ function buildFallbackVideoBook(
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+
+  // Priority: CLI --port arg, then DEFAULT_APP_PORT, then fallback to 3000 (ignore NGINX_PORT 8080)
+  const args = process.argv.slice(2);
+  const portArgIdx = args.indexOf('--port');
+  const cliPort = portArgIdx !== -1 && args[portArgIdx + 1] ? Number(args[portArgIdx + 1]) : null;
+  const envPort = process.env.DEFAULT_APP_PORT
+    ? Number(process.env.DEFAULT_APP_PORT)
+    : process.env.PORT && process.env.PORT !== '8080'
+    ? Number(process.env.PORT)
+    : 3000;
+  const PORT = cliPort || envPort || 3000;
 
   app.use(express.json({ limit: '50mb' }));
 

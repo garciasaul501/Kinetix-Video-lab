@@ -1560,13 +1560,16 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
     }
   });
 
-  // 6. Export Real H.264 + AAC MP4 Video File with Images & Audio (No Time Limit)
+  // 6. Export Real H.264 / H.265 (HEVC) + AAC MP4 Video File with Bitrate & Size Optimization (No Time Limit)
   app.post('/api/export-mp4', async (req, res) => {
     const {
       videoBase64,
       audioBase64,
       durationSec = 12,
       capturePassDurationSec = 12,
+      codec = 'h264',
+      videoBitrateKbps = 2500,
+      audioBitrateKbps = 192,
     } = req.body || {};
     if (!videoBase64 || typeof videoBase64 !== 'string') {
       res.status(400).json({ error: 'Se requieren los datos de video para exportar a MP4.' });
@@ -1603,6 +1606,16 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
           ? `setpts=${ptsRatio}*PTS,scale=trunc(iw/2)*2:trunc(ih/2)*2`
           : 'scale=trunc(iw/2)*2:trunc(ih/2)*2';
 
+      const isH265 = codec === 'h265' || codec === 'hevc';
+      const vCodec = isH265 ? 'libx265' : 'libx264';
+      const bitrateNum = Math.max(600, Math.min(25000, Number(videoBitrateKbps) || 2500));
+      const audioBitrateNum = Math.max(96, Math.min(320, Number(audioBitrateKbps) || 192));
+      const bitrateArg = `${bitrateNum}k`;
+      const audioBitrateArg = `${audioBitrateNum}k`;
+
+      // H.265 extra flags: tag hvc1 for Apple QuickTime / Safari / iOS compatibility
+      const extraCodecFlags = isH265 ? ['-tag:v', 'hvc1'] : [];
+
       if (hasCustomAudio) {
         await execFileAsync('ffmpeg', [
           '-y',
@@ -1619,15 +1632,18 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
           '-vf',
           'scale=trunc(iw/2)*2:trunc(ih/2)*2',
           '-c:v',
-          'libx264',
+          vCodec,
+          '-b:v',
+          bitrateArg,
           '-preset',
           'ultrafast',
           '-pix_fmt',
           'yuv420p',
+          ...extraCodecFlags,
           '-c:a',
           'aac',
           '-b:a',
-          '192k',
+          audioBitrateArg,
           '-shortest',
           '-movflags',
           '+faststart',
@@ -1653,15 +1669,18 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
             Math.max(1, targetDur - 1.2) +
             ':d=1.2',
           '-c:v',
-          'libx264',
+          vCodec,
+          '-b:v',
+          bitrateArg,
           '-preset',
           'ultrafast',
           '-pix_fmt',
           'yuv420p',
+          ...extraCodecFlags,
           '-c:a',
           'aac',
           '-b:a',
-          '160k',
+          audioBitrateArg,
           '-shortest',
           '-movflags',
           '+faststart',
@@ -1671,10 +1690,11 @@ Genera una salida limpia, exhaustiva y lista para enviar a locuciÃ³n y generaciÃ
 
       const mp4Buffer = await fs.promises.readFile(outputMp4Path);
       res.setHeader('Content-Type', 'video/mp4');
-      res.setHeader('Content-Disposition', 'attachment; filename="kinetix-video.mp4"');
+      const filename = isH265 ? 'kinetix-video-h265.mp4' : 'kinetix-video-h264.mp4';
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(mp4Buffer);
     } catch (_err: any) {
-      res.status(500).json({ error: 'Error al codificar el archivo MP4.' });
+      res.status(500).json({ error: 'Error al codificar el archivo MP4 con el cÃ³dec seleccionado.' });
     } finally {
       await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     }

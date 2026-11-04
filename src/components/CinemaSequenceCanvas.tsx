@@ -15,6 +15,7 @@ import {
   drawCoverImage,
   renderSequenceToVideoUrl,
   downloadAudioAsMp3,
+  getKenBurnsTransform,
 } from '../utils/videoRenderer';
 
 export interface SequenceShot {
@@ -86,6 +87,9 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
   const [recordedMp4Url, setRecordedMp4Url] = useState<string | null>(null);
   const [isExportingMp3, setIsExportingMp3] = useState<boolean>(false);
   const [mp3Downloaded, setMp3Downloaded] = useState<boolean>(false);
+  const [activeShotMotionLabel, setActiveShotMotionLabel] = useState<string>(
+    'Ken Burns Dinámico'
+  );
 
   const shots = sequence.shots && sequence.shots.length > 0 ? sequence.shots : [];
   const totalDuration =
@@ -237,6 +241,15 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
       if (lastReportedShotRef.current !== currentShotIndex) {
         lastReportedShotRef.current = currentShotIndex;
         onActiveShotChange?.(currentShotIndex);
+        const currentShotItem = shots[currentShotIndex];
+        const initialKb = getKenBurnsTransform(
+          currentShotItem?.cameraMotion,
+          0.5,
+          currentShotIndex,
+          100,
+          100
+        );
+        setActiveShotMotionLabel(initialKb.label);
       }
 
       const shot = shots[currentShotIndex] || {
@@ -262,31 +275,20 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
       ctx.save();
       ctx.clearRect(0, 0, w, h);
 
-      // Camera motion transform
-      let scale = 1;
-      let offsetX = 0;
-      let offsetY = 0;
-      const motion = (shot.cameraMotion || '').toLowerCase();
-      if (motion.includes('dolly') || motion.includes('zoom-in')) {
-        scale = 1 + shotProgress * 0.18;
-      } else if (motion.includes('zoom-out')) {
-        scale = 1.18 - shotProgress * 0.16;
-      } else if (motion.includes('pan-right')) {
-        scale = 1.12;
-        offsetX = (0.5 - shotProgress) * w * 0.08;
-      } else if (motion.includes('pan-left')) {
-        scale = 1.12;
-        offsetX = (shotProgress - 0.5) * w * 0.08;
-      } else if (motion.includes('crane')) {
-        scale = 1.1;
-        offsetY = (0.5 - shotProgress) * h * 0.08;
-      } else {
-        scale = 1.05 + Math.sin(shotProgress * Math.PI) * 0.06;
-        offsetX = Math.cos(shotProgress * Math.PI) * 18;
-      }
+      // Automated Smooth Ken Burns Cinematic Transform
+      const kb = getKenBurnsTransform(
+        shot.cameraMotion,
+        shotProgress,
+        currentShotIndex,
+        w,
+        h
+      );
 
-      ctx.translate(w / 2 + offsetX, h / 2 + offsetY);
-      ctx.scale(scale, scale);
+      ctx.translate(w / 2 + kb.offsetX, h / 2 + kb.offsetY);
+      if (kb.rotationRad) {
+        ctx.rotate(kb.rotationRad);
+      }
+      ctx.scale(kb.scale, kb.scale);
       ctx.translate(-w / 2, -h / 2);
 
       const loadedShotImg =
@@ -466,9 +468,9 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
       ctx.fillText(`TC 00:${mins}:${secs}:${frames}`, 20, Math.max(18, barHeight * 0.65));
 
       ctx.textAlign = 'right';
-      ctx.fillStyle = 'rgba(245, 158, 11, 0.9)';
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.95)';
       ctx.fillText(
-        `PLANO 0${shot.shotNumber} · ${loadedShotImg ? 'IMAGEN ACTIVA · ' : ''}${shot.focalLens}`,
+        `PLANO 0${shot.shotNumber} · 🎬 ${kb.label.toUpperCase()} · ${shot.focalLens}`,
         w - 20,
         Math.max(18, barHeight * 0.65)
       );
@@ -483,7 +485,7 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative bg-[#050608] border border-white/10 rounded-lg overflow-hidden flex items-center justify-center">
+      <div className="relative bg-[#050608] border border-white/10 rounded-lg overflow-hidden flex items-center justify-center group">
         <canvas
           ref={canvasRef}
           width={aspectRatio === '16:9' ? 960 : 540}
@@ -494,6 +496,14 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
               : 'h-[460px] aspect-[9/16] object-contain mx-auto'
           }
         />
+
+        {/* Cinematic Ken Burns Dynamic Motion Overlay Indicator */}
+        <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none z-10">
+          <div className="px-2.5 py-1 rounded-md bg-black/85 backdrop-blur-md border border-amber-500/50 text-[10px] font-mono text-amber-300 font-extrabold flex items-center gap-1.5 shadow-xl">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>KEN BURNS 60FPS: {activeShotMotionLabel.toUpperCase()}</span>
+          </div>
+        </div>
 
         {audioUrl && (
           <audio ref={audioRef} src={audioUrl} autoPlay loop className="hidden" />

@@ -27,8 +27,14 @@ import {
   ChevronUp,
   Layers,
   Check,
+  Sliders,
 } from 'lucide-react';
-import { VideoBook, AudiobookVisualMode } from '../utils/videoRenderer';
+import {
+  VideoBook,
+  AudiobookVisualMode,
+  VideoExportSettings,
+  DEFAULT_VIDEO_EXPORT_SETTINGS,
+} from '../utils/videoRenderer';
 import { VoiceoverTake } from './StudioAudioPlayer';
 import {
   TalkingAvatarStage,
@@ -64,7 +70,7 @@ interface VideoBookPlayerProps {
   isExportingMp4: boolean;
   mp4Progress: number;
   exportedMp4Url: string | null;
-  onExportMp4: () => void;
+  onExportMp4: (settings?: VideoExportSettings) => void;
   onExportMp3: () => void;
   onExportPdf: () => void;
   onExportTxt: () => void;
@@ -119,6 +125,23 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [readingFontSize, setReadingFontSize] = useState<'normal' | 'large' | 'xlarge'>('large');
+
+  // Video Export Settings (Bitrate & Codec H.264 / H.265) State
+  const [isExportSettingsOpen, setIsExportSettingsOpen] = useState(false);
+  const [videoExportSettings, setVideoExportSettings] = useState<VideoExportSettings>(() => {
+    try {
+      const saved = localStorage.getItem('kinetix_video_export_settings_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return { ...DEFAULT_VIDEO_EXPORT_SETTINGS };
+  });
+
+  const handleUpdateExportSettings = (nextSettings: VideoExportSettings) => {
+    setVideoExportSettings(nextSettings);
+    try {
+      localStorage.setItem('kinetix_video_export_settings_v1', JSON.stringify(nextSettings));
+    } catch {}
+  };
 
   // 30 Realistic AI Avatars Gallery State
   const [showAvatarGallery, setShowAvatarGallery] = useState<boolean>(true);
@@ -905,9 +928,23 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               )}
             </button>
 
+            {/* Botón de Configuración Avanzada de Exportación (Bitrate & Códec H.264 / H.265) */}
             <button
               type="button"
-              onClick={onExportMp4}
+              onClick={() => setIsExportSettingsOpen(true)}
+              className="px-3.5 py-2.5 rounded-lg bg-[#141824] hover:bg-[#1a2030] border border-amber-400/50 hover:border-amber-400 text-slate-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              title="Ajustar bitrate y códec H.264 o H.265 para optimizar el tamaño del archivo"
+            >
+              <Sliders className="w-3.5 h-3.5 text-amber-400" />
+              <span>Ajustes MP4</span>
+              <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono text-[10px] font-black uppercase">
+                {videoExportSettings.codec.toUpperCase()} · {(videoExportSettings.videoBitrateKbps / 1000).toFixed(1)}M
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onExportMp4(videoExportSettings)}
               disabled={isExportingMp4}
               className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
             >
@@ -1081,12 +1118,22 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                       src={currentImage}
                       alt={currentPage.chapterTitle}
                       referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover transition-transform duration-1000 ease-out"
-                      style={{
-                        transform: isPlaying
-                          ? `scale(${1.02 + pageProgress * 0.08})`
-                          : 'scale(1.02)',
-                      }}
+                      className={`w-full h-full object-cover transition-transform duration-1000 ease-out ${
+                        isPlaying
+                          ? activePageIdx % 4 === 0
+                            ? 'kenburns-zoom-in'
+                            : activePageIdx % 4 === 1
+                              ? 'kenburns-pan-left'
+                              : activePageIdx % 4 === 2
+                                ? 'kenburns-zoom-out'
+                                : 'kenburns-pan-right'
+                          : 'scale-100'
+                      }`}
+                      style={
+                        !isPlaying
+                          ? { transform: 'scale(1.02)' }
+                          : undefined
+                      }
                     />
                     <div
                       className={`absolute inset-0 ${
@@ -1605,6 +1652,26 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
           {/* Direct Download Links for the Spoken Audiobook (MP4, MP3, PDF, TXT) */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onExportMp4(videoExportSettings)}
+              disabled={isExportingMp4}
+              className="px-3.5 py-1.5 rounded-lg border border-amber-400 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+              title="Exportar y Descargar Video Audiolibro (.MP4)"
+            >
+              {isExportingMp4 ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
+                  <span>Exportando ({mp4Progress}%)...</span>
+                </>
+              ) : (
+                <>
+                  <Film className="w-3.5 h-3.5 text-slate-950" />
+                  <span>Exportar Video (.MP4)</span>
+                </>
+              )}
+            </button>
+
             {exportedMp4Url && (
               <a
                 href={exportedMp4Url}

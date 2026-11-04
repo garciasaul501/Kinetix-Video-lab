@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { StoryboardSceneRow } from '../utils/scriptExporter';
 import { VoiceoverTake } from './StudioAudioPlayer';
+import { getKenBurnsTransform } from '../utils/videoRenderer';
 
 interface FloatingStoryboardPlayerProps {
   projectTitle: string;
@@ -235,11 +236,20 @@ export const FloatingStoryboardPlayer: React.FC<FloatingStoryboardPlayerProps> =
     // 2. If scene has an AI Keyframe Image, draw with smooth camera motion (Ken Burns)
     const cachedImg = scene.imageUrl ? loadedImagesRef.current[scene.imageUrl] : null;
     if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+      const kb = getKenBurnsTransform(
+        scene.visualStaging || scene.aiVisualPrompt,
+        localProgress,
+        activeSceneIndex,
+        w,
+        h
+      );
+
       ctx.save();
-      const zoom = 1.02 + localProgress * 0.1;
-      const panX = (localProgress - 0.5) * w * 0.04;
-      ctx.translate(w * 0.5 + panX, h * 0.5);
-      ctx.scale(zoom, zoom);
+      ctx.translate(w * 0.5 + kb.offsetX, h * 0.5 + kb.offsetY);
+      if (kb.rotationRad) {
+        ctx.rotate(kb.rotationRad);
+      }
+      ctx.scale(kb.scale, kb.scale);
 
       const imgRatio = cachedImg.naturalWidth / cachedImg.naturalHeight;
       const canvasRatio = w / h;

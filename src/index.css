@@ -284,16 +284,27 @@ label.cursor-pointer:hover {
 }
 
 /* ============================================================================
-   MODELO ORO FUTURISTA (24K GOLD TYPOGRAPHY & CYBER-LUXURY OBSIDIAN SURFACES)
+   ESTUDIO FONDO BLANCO CON LETRAS COLOR ORO (24K LUXURY GOLD & CRISP WHITE)
+   Fondo 100% blanco puro con tipografía, títulos y distintivos en color oro
    ============================================================================ */
+body {
+  background-color: #FFFFFF !important;
+  color: #1E293B !important;
+}
+
+h1, h2, h3, h4, .font-display {
+  color: #B45309 !important;
+  letter-spacing: -0.01em;
+}
+
 .theme-gold-futuristic {
-  background-color: #0A0C12 !important;
-  color: #FDE68A !important;
+  background-color: #FFFFFF !important;
+  color: #1E293B !important;
 }
 
 .theme-gold-futuristic header {
-  background-color: rgba(13, 16, 24, 0.92) !important;
-  border-bottom-color: rgba(245, 158, 11, 0.35) !important;
+  background-color: #FFFFFF !important;
+  border-bottom-color: rgba(245, 158, 11, 0.4) !important;
 }
 
 .theme-gold-futuristic h1,
@@ -301,53 +312,30 @@ label.cursor-pointer:hover {
 .theme-gold-futuristic h3,
 .theme-gold-futuristic h4,
 .theme-gold-futuristic .font-display {
-  color: #FBBF24 !important;
-  text-shadow: 0 2px 10px rgba(245, 158, 11, 0.25);
+  color: #B45309 !important;
+  text-shadow: 0 1px 3px rgba(245, 158, 11, 0.2);
 }
 
-.theme-gold-futuristic p,
-.theme-gold-futuristic span:not(.no-gold),
-.theme-gold-futuristic label:not(.no-gold) {
-  color: #FEF3C7;
-}
-
-.theme-gold-futuristic .text-slate-950,
-.theme-gold-futuristic .text-slate-900,
-.theme-gold-futuristic .text-slate-800,
-.theme-gold-futuristic .text-slate-700 {
-  color: #FDE68A !important;
-}
-
-.theme-gold-futuristic .text-slate-500,
-.theme-gold-futuristic .text-slate-600 {
-  color: #F59E0B !important;
+.theme-gold-futuristic p {
+  color: #334155 !important;
 }
 
 .theme-gold-futuristic nav {
-  background-color: #121520 !important;
+  background-color: #FFFFFF !important;
   border-color: rgba(245, 158, 11, 0.35) !important;
 }
 
 .theme-gold-futuristic .bg-white {
-  background-color: #0F121C !important;
-  border-color: rgba(245, 158, 11, 0.25) !important;
-  color: #FDE68A !important;
-}
-
-.theme-gold-futuristic .bg-\[\#FAFAFC\],
-.theme-gold-futuristic .bg-slate-50,
-.theme-gold-futuristic .bg-slate-100 {
-  background-color: #141724 !important;
-  border-color: rgba(245, 158, 11, 0.22) !important;
-  color: #FDE68A !important;
+  background-color: #FFFFFF !important;
+  border-color: rgba(245, 158, 11, 0.35) !important;
 }
 
 .theme-gold-futuristic input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .theme-gold-futuristic select,
 .theme-gold-futuristic textarea {
-  background-color: #121522 !important;
-  color: #FEF3C7 !important;
-  border-color: rgba(245, 158, 11, 0.35) !important;
+  background-color: #FFFFFF !important;
+  color: #0F172A !important;
+  border-color: rgba(245, 158, 11, 0.45) !important;
 }
 
 .theme-gold-futuristic input::placeholder,
@@ -356,15 +344,15 @@ label.cursor-pointer:hover {
 }
 
 .text-gold-gradient {
-  background: linear-gradient(135deg, #FFFBEB 0%, #FDE68A 25%, #F59E0B 55%, #D97706 85%, #B45309 100%);
+  background: linear-gradient(135deg, #B45309 0%, #D97706 35%, #F59E0B 70%, #92400E 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 2px 8px rgba(245, 158, 11, 0.3));
+  filter: drop-shadow(0 1px 2px rgba(217, 119, 6, 0.25));
 }
 
 .border-gold-glow {
-  border-color: rgba(245, 158, 11, 0.45) !important;
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.6) !important;
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.2);
 }
 
 /* ============================================================================
@@ -449,5 +437,115 @@ label.cursor-pointer:hover {
   border-color: #FBBF24 !important;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.95), 0 0 25px rgba(251, 191, 36, 0.4) !important;
   transform: translateY(-2px);
+}
+
+/* ============================================================================
+   CINEMATIC KEN BURNS SMOOTH ZOOM & PAN ANIMATIONS (HOLLYWOOD DYNAMICS)
+   Automated dynamic motion for generated visual sequence images
+   ============================================================================ */
+
+@keyframes kenburnsZoomIn {
+  0% {
+    transform: scale(1) translate(0%, 0%);
+  }
+  50% {
+    transform: scale(1.08) translate(-1.2%, -0.8%);
+  }
+  100% {
+    transform: scale(1.16) translate(-2.5%, -1.5%);
+  }
+}
+
+@keyframes kenburnsZoomOut {
+  0% {
+    transform: scale(1.18) translate(-2%, -1.5%);
+  }
+  50% {
+    transform: scale(1.09) translate(1%, 0.8%);
+  }
+  100% {
+    transform: scale(1.02) translate(0%, 0%);
+  }
+}
+
+@keyframes kenburnsPanRight {
+  0% {
+    transform: scale(1.12) translate(-3.5%, 0%);
+  }
+  50% {
+    transform: scale(1.15) translate(0%, -1.2%);
+  }
+  100% {
+    transform: scale(1.12) translate(3.5%, 0%);
+  }
+}
+
+@keyframes kenburnsPanLeft {
+  0% {
+    transform: scale(1.12) translate(3.5%, 0%);
+  }
+  50% {
+    transform: scale(1.15) translate(0%, 1.2%);
+  }
+  100% {
+    transform: scale(1.12) translate(-3.5%, 0%);
+  }
+}
+
+@keyframes kenburnsCinematicFloat {
+  0% {
+    transform: scale(1.03) translate(0%, 0%);
+  }
+  25% {
+    transform: scale(1.09) translate(-1.5%, 1%);
+  }
+  50% {
+    transform: scale(1.15) translate(-0.5%, -1.5%);
+  }
+  75% {
+    transform: scale(1.09) translate(1.5%, -0.5%);
+  }
+  100% {
+    transform: scale(1.03) translate(0%, 0%);
+  }
+}
+
+.kenburns-active {
+  animation-timing-function: cubic-bezier(0.25, 1, 0.5, 1);
+  animation-fill-mode: both;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+  will-change: transform;
+  transform-origin: center center;
+}
+
+.kenburns-zoom-in {
+  animation: kenburnsZoomIn 14s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+  will-change: transform;
+}
+
+.kenburns-zoom-out {
+  animation: kenburnsZoomOut 14s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+  will-change: transform;
+}
+
+.kenburns-pan-right {
+  animation: kenburnsPanRight 16s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+  will-change: transform;
+}
+
+.kenburns-pan-left {
+  animation: kenburnsPanLeft 16s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+  will-change: transform;
+}
+
+.kenburns-float {
+  animation: kenburnsCinematicFloat 18s cubic-bezier(0.25, 1, 0.5, 1) infinite alternate;
+  will-change: transform;
+}
+
+.kenburns-smooth-auto {
+  transition: transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
 }
 

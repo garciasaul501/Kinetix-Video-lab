@@ -35,6 +35,7 @@ import {
   HelpCircle,
   Heart,
   LogIn,
+  Zap,
 } from 'lucide-react';
 import { pcmBase64ToWav, createSyntheticToneWav } from './utils/audioWav';
 import {
@@ -110,6 +111,14 @@ import { ProposalSeoEditor } from './components/ProposalSeoEditor';
 import { BuyTokensModal } from './components/BuyTokensModal';
 import { UnifiedActionToolbar } from './components/UnifiedActionToolbar';
 import { SocialShareModal } from './components/SocialShareModal';
+import { LanguageSelector } from './components/LanguageSelector';
+import { useToast } from './components/ToastNotification';
+import {
+  SupportedLanguage,
+  getSavedLanguage,
+  saveLanguage,
+  t,
+} from './utils/i18n';
 
 type ActiveModule = StudioModuleId;
 
@@ -659,6 +668,7 @@ function loadInitialVoiceTakes(): VoiceoverTake[] {
 }
 
 export default function App() {
+  const toast = useToast();
   const [activeModule, setActiveModule] = useState<ActiveModule>('videobook');
   const [targetChaptersCount, setTargetChaptersCount] = useState<number>(8);
   const [videoDurationMode, setVideoDurationMode] = useState<string>('unlimited');
@@ -1025,15 +1035,20 @@ ${textoPdf || '{{texto_pdf}}'}
 
   const handleCreateVideoBookFromPdf = async (autoIllustrateAndNarrate = false) => {
     if (!textoPdf.trim()) {
-      setVideoBookError(
-        'Sube primero un archivo PDF o selecciona uno de los documentos de ejemplo.'
-      );
+      const msg = 'Sube primero un archivo PDF o selecciona uno de los documentos de ejemplo.';
+      setVideoBookError(msg);
+      toast.error('Documento no encontrado', msg);
       return;
     }
 
     setIsGeneratingVideoBook(true);
     setVideoBookError(null);
     setExportedBookMp4Url(null);
+
+    const toastId = toast.loading(
+      'Generando Audiolibro IA...',
+      'Extrayendo texto del PDF, diseñando capítulos y asignando escenas visuales...'
+    );
 
     try {
       const res = await fetch('/api/pdf-to-videobook', {
@@ -1068,6 +1083,12 @@ ${textoPdf || '{{texto_pdf}}'}
         setNarrationScript(createdBook.fullNarration);
       }
 
+      toast.dismiss(toastId);
+      toast.success(
+        '¡Audiolibro Creado con Éxito!',
+        `Se han generado ${createdBook.pages.length} capítulos sincronizados con avatar y escenas.`
+      );
+
       if (autoIllustrateAndNarrate) {
         await Promise.all([
           handleGenerateAllBookIllustrations(createdBook),
@@ -1075,7 +1096,10 @@ ${textoPdf || '{{texto_pdf}}'}
         ]);
       }
     } catch (err: any) {
-      setVideoBookError(err?.message || 'Error al crear el Audiolibro desde el PDF.');
+      toast.dismiss(toastId);
+      const errMsg = err?.message || 'Error al crear el Audiolibro desde el PDF.';
+      setVideoBookError(errMsg);
+      toast.error('Error al generar audiolibro', errMsg);
     } finally {
       setIsGeneratingVideoBook(false);
     }
@@ -1177,6 +1201,10 @@ ${textoPdf || '{{texto_pdf}}'}
         return next;
       });
       setShowAudiobookFolder(true);
+      toast.success(
+        '¡Audiolibro Guardado!',
+        `El proyecto se guardó exitosamente en la bóveda (${format}).`
+      );
     } finally {
       setIsSavingToFolder(null);
       setSaveFolderProgress(0);
@@ -1187,6 +1215,12 @@ ${textoPdf || '{{texto_pdf}}'}
     if (isExportingBookMp4) return;
     setIsExportingBookMp4(true);
     setBookMp4Progress(5);
+
+    const toastId = toast.loading(
+      'Exportando Video Audiolibro (.MP4)...',
+      'Renderizando fotogramas clave, avatar hablado y pistas sincronizadas...'
+    );
+
     try {
       const url = await renderVideoBookToMp4Url(
         videoBook,
@@ -1205,6 +1239,12 @@ ${textoPdf || '{{texto_pdf}}'}
         .replace(/[^a-z0-9]+/g, '-')
         .slice(0, 35);
       triggerDownloadUrl(url, `${slug || 'audiolibro'}-video.mp4`);
+
+      toast.dismiss(toastId);
+      toast.success(
+        '¡Video MP4 Exportado con Éxito!',
+        `El archivo de "${videoBook.bookTitle || 'Audiolibro'}" se ha generado y descargado.`
+      );
 
       // Also save MP4 automatically into the Audiobook Folder Vault
       try {
@@ -1249,64 +1289,83 @@ ${textoPdf || '{{texto_pdf}}'}
         // Ignore auto-vault error
       }
     } catch (err: any) {
-      setVideoBookError(err?.message || 'Error al exportar el Audiolibro en MP4.');
+      toast.dismiss(toastId);
+      const errMsg = err?.message || 'Error al exportar el Audiolibro en MP4.';
+      setVideoBookError(errMsg);
+      toast.error('Error al exportar video', errMsg);
     } finally {
       setIsExportingBookMp4(false);
     }
   };
 
   const handleExportVideoBookMp3 = async () => {
-    const slug = (videoBook.bookTitle || 'audiolibro')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .slice(0, 35);
-    const { blob } = await downloadAudioAsMp3({
-      audioBase64: activeTake ? activeTake.audioBase64 : undefined,
-      scriptText: videoBook.fullNarration,
-      voiceGender: selectedAvatar.gender,
-      durationSec: videoBook.totalEstimatedSec || 40,
-      filename: `${slug || 'audiolibro'}-completo.mp3`,
-    });
+    const toastId = toast.loading(
+      'Exportando Audio MP3...',
+      'Empaquetando la narración completa en archivo MP3 de alta fidelidad...'
+    );
 
-    // Also save MP3 automatically into the Audiobook Folder Vault
     try {
-      const autoId = `ab-mp3-${Date.now()}`;
-      await saveMediaBlobToIdb(`${autoId}:mp3`, blob);
-      const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
-      const nowStr = new Date().toLocaleTimeString('es-ES', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      const newItem: SavedAudiobookItem = {
-        id: autoId,
-        title: videoBook.bookTitle || 'Audiolibro IA',
-        subtitle: videoBook.subtitle,
-        folderName: customFolders[0] || 'Ciencia & Tecnología IA',
-        format: 'MP3',
-        createdAt: `Exportado MP3 · ${nowStr}`,
+      const slug = (videoBook.bookTitle || 'audiolibro')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 35);
+      const { blob } = await downloadAudioAsMp3({
+        audioBase64: activeTake ? activeTake.audioBase64 : undefined,
+        scriptText: videoBook.fullNarration,
+        voiceGender: selectedAvatar.gender,
         durationSec: videoBook.totalEstimatedSec || 40,
-        chaptersCount: videoBook.pages.length,
-        avatarId: selectedAvatar.id,
-        avatarName: selectedAvatar.name,
-        avatarThumbUrl:
-          customAvatarUrl || selectedAvatar.customPhotoUrl || selectedAvatar.realPhotoUrl,
-        coverImageUrl:
-          pageImages[0] ||
-          'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1280&q=85',
-        visualMode: audiobookVisualMode,
-        fileSizeLabel: `${mb} MB (MP3)`,
-        videoBook,
-        pageImages,
-        audioBase64: activeTake ? activeTake.audioBase64 : null,
-        hasMp3Blob: true,
-      };
-      setSavedAudiobooks((prev) => {
-        const next = [newItem, ...prev];
-        saveAudiobooksMetaToStorage(next);
-        return next;
+        filename: `${slug || 'audiolibro'}-completo.mp3`,
       });
-    } catch (_e) {
-      // Ignore auto-vault error
+
+      toast.dismiss(toastId);
+      toast.success(
+        '¡Audiolibro MP3 Listo!',
+        'El archivo de audio (.MP3) se ha generado y descargado correctamente.'
+      );
+
+      // Also save MP3 automatically into the Audiobook Folder Vault
+      try {
+        const autoId = `ab-mp3-${Date.now()}`;
+        await saveMediaBlobToIdb(`${autoId}:mp3`, blob);
+        const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
+        const nowStr = new Date().toLocaleTimeString('es-ES', {
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        const newItem: SavedAudiobookItem = {
+          id: autoId,
+          title: videoBook.bookTitle || 'Audiolibro IA',
+          subtitle: videoBook.subtitle,
+          folderName: customFolders[0] || 'Ciencia & Tecnología IA',
+          format: 'MP3',
+          createdAt: `Exportado MP3 · ${nowStr}`,
+          durationSec: videoBook.totalEstimatedSec || 40,
+          chaptersCount: videoBook.pages.length,
+          avatarId: selectedAvatar.id,
+          avatarName: selectedAvatar.name,
+          avatarThumbUrl:
+            customAvatarUrl || selectedAvatar.customPhotoUrl || selectedAvatar.realPhotoUrl,
+          coverImageUrl:
+            pageImages[0] ||
+            'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=1280&q=85',
+          visualMode: audiobookVisualMode,
+          fileSizeLabel: `${mb} MB (MP3)`,
+          videoBook,
+          pageImages,
+          audioBase64: activeTake ? activeTake.audioBase64 : null,
+          hasMp3Blob: true,
+        };
+        setSavedAudiobooks((prev) => {
+          const next = [newItem, ...prev];
+          saveAudiobooksMetaToStorage(next);
+          return next;
+        });
+      } catch (_e) {
+        // Ignore auto-vault error
+      }
+    } catch (err: any) {
+      toast.dismiss(toastId);
+      toast.error('Error al exportar MP3', err?.message || 'No se pudo generar el archivo de audio.');
     }
   };
 
@@ -1623,12 +1682,19 @@ ${textoPdf || '{{texto_pdf}}'}
   const handleGenerateNarration = async (overrideScript?: string) => {
     const textToSpeak = (overrideScript ?? narrationScript).trim();
     if (!textToSpeak) {
-      setNarrationError('Por favor ingresa o selecciona un guion para generar la narración.');
+      const msg = 'Por favor ingresa o selecciona un guion para generar la narración.';
+      setNarrationError(msg);
+      toast.error('Texto vacío', msg);
       return;
     }
 
     setIsGeneratingNarration(true);
     setNarrationError(null);
+
+    const toastId = toast.loading(
+      'Sintetizando Voz Neuronal...',
+      `Generando audio con voz ${voiceName} (${voiceGender}, ${voiceAccent})...`
+    );
 
     try {
       const response = await fetch('/api/narration', {
@@ -1680,6 +1746,12 @@ ${textoPdf || '{{texto_pdf}}'}
       });
       setActiveTakeId(newTake.id);
 
+      toast.dismiss(toastId);
+      toast.success(
+        '¡Locución Sintetizada con Éxito!',
+        `Pista de voz (${processed.durationSec.toFixed(1)}s · 24 kHz) agregada a tu historial.`
+      );
+
       if (data.quotaFallback && typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
           window.speechSynthesis.cancel();
@@ -1693,7 +1765,10 @@ ${textoPdf || '{{texto_pdf}}'}
         }
       }
     } catch (err: any) {
-      setNarrationError(err?.message || 'Error al sintetizar la voz con IA.');
+      toast.dismiss(toastId);
+      const errMsg = err?.message || 'Error al sintetizar la voz con IA.';
+      setNarrationError(errMsg);
+      toast.error('Error al generar locución', errMsg);
     } finally {
       setIsGeneratingNarration(false);
     }
@@ -2088,6 +2163,15 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   });
 
+  const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>(() => {
+    return getSavedLanguage();
+  });
+
+  const handleLanguageChange = (newLang: SupportedLanguage) => {
+    setCurrentLanguage(newLang);
+    saveLanguage(newLang);
+  };
+
   // Action Handlers for Unified Action Toolbar
   const handleToolbarCrear = () => {
     setActiveModule('videobook');
@@ -2126,6 +2210,7 @@ ${textoPdf || '{{texto_pdf}}'}
   const handleToolbarEliminar = () => {
     setTextoPdf('');
     setUploadedPdfName(null);
+    toast.info('Borrador Limpiado', 'Se ha restablecido el texto para comenzar un nuevo proyecto.');
   };
 
   const handleToolbarCompartir = () => {
@@ -2141,7 +2226,7 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
-  const handleTokensPurchased = (tokensToAdd: number, _amountPaid: number, _packageName: string) => {
+  const handleTokensPurchased = (tokensToAdd: number, amountPaid: number, packageName: string) => {
     setUserTokenBalance((prev) => {
       const next = prev + tokensToAdd;
       try {
@@ -2151,6 +2236,10 @@ ${textoPdf || '{{texto_pdf}}'}
       }
       return next;
     });
+    toast.success(
+      '¡Compra de Tokens Exitosa!',
+      `Se han acreditado +${tokensToAdd.toLocaleString()} tokens a tu cuenta mediante PayPal ($${amountPaid.toFixed(2)}).`
+    );
   };
 
   const [isGoldModel, setIsGoldModel] = useState<boolean>(() => {
@@ -2205,11 +2294,7 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   return (
-    <div
-      className={`min-h-screen flex flex-col transition-colors duration-300 selection:bg-amber-500 selection:text-black ${
-        isGoldModel ? 'theme-gold-futuristic' : 'bg-[#FAFAFC] text-slate-900'
-      }`}
-    >
+    <div className="min-h-screen flex flex-col bg-white text-slate-900 transition-colors duration-300 selection:bg-amber-500 selection:text-black">
       {/* Ultra-Modern Minimalist Glass Header */}
       <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-xl border-b border-slate-200/80 transition-all">
         <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
@@ -2232,7 +2317,7 @@ ${textoPdf || '{{texto_pdf}}'}
               title="Entrar ahora a la consola de creación"
             >
               <LogIn className="w-3.5 h-3.5" />
-              <span>Entrar Ahora</span>
+              <span>{t('enterNow', currentLanguage)}</span>
             </button>
           </div>
 
@@ -2251,7 +2336,7 @@ ${textoPdf || '{{texto_pdf}}'}
               }`}
             >
               <BookOpen className="w-4 h-4" />
-              <span>Audiolibros & PDF ({savedAudiobooks.length})</span>
+              <span>{t('tabAudiobooks', currentLanguage)} ({savedAudiobooks.length})</span>
             </button>
 
             <button
@@ -2264,7 +2349,7 @@ ${textoPdf || '{{texto_pdf}}'}
               }`}
             >
               <Layers className="w-4 h-4" />
-              <span>1,200 Fotos de Nichos</span>
+              <span>{t('tabGallery', currentLanguage)}</span>
             </button>
 
             <button
@@ -2277,7 +2362,7 @@ ${textoPdf || '{{texto_pdf}}'}
               }`}
             >
               <History className="w-4 h-4" />
-              <span>Guiones ({scriptHistory.length})</span>
+              <span>{t('tabScript', currentLanguage)} ({scriptHistory.length})</span>
             </button>
 
             <button
@@ -2289,7 +2374,7 @@ ${textoPdf || '{{texto_pdf}}'}
                   : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              Storyboard PDF
+              {t('tabDirector', currentLanguage)}
             </button>
 
             <button
@@ -2301,7 +2386,7 @@ ${textoPdf || '{{texto_pdf}}'}
                   : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              Voces IA
+              {t('tabNarration', currentLanguage)}
             </button>
 
             <button
@@ -2313,37 +2398,17 @@ ${textoPdf || '{{texto_pdf}}'}
                   : 'text-slate-800 hover:text-slate-950 hover:bg-white'
               }`}
             >
-              Videos Sin Límite MP4
+              {t('tabClips', currentLanguage)}
             </button>
           </nav>
 
-          {/* Futuristic Gold Model Toggle, Viral Logo Button & Clean CTAs */}
+          {/* Futuristic Gold Model Toggle, Language Selector & Action CTAs */}
           <div className="flex items-center gap-2">
-            {/* Modelo Moderno con Letras Color Oro Toggle */}
-            <button
-              type="button"
-              onClick={() => {
-                const next = !isGoldModel;
-                setIsGoldModel(next);
-                try {
-                  localStorage.setItem('kinetix_gold_model_mode', String(next));
-                } catch {
-                  // ignore
-                }
-              }}
-              className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 border transition-all cursor-pointer shadow-sm ${
-                isGoldModel
-                  ? 'bg-gradient-to-r from-amber-500/20 via-yellow-500/15 to-amber-600/20 text-amber-300 border-amber-400/50 shadow-[0_0_15px_rgba(245,158,11,0.25)]'
-                  : 'bg-white hover:bg-slate-100 text-slate-800 border-slate-300'
-              }`}
-              title="Activar / Desactivar Modelo Moderno con Letras Color Oro"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-              <span className="hidden sm:inline">
-                {isGoldModel ? '👑 Letras Oro: ON' : 'Letras Oro: OFF'}
-              </span>
-              <span className="sm:hidden">Oro {isGoldModel ? 'ON' : 'OFF'}</span>
-            </button>
+            {/* Multi-Language Selector Dropdown */}
+            <LanguageSelector
+              currentLanguage={currentLanguage}
+              onLanguageChange={handleLanguageChange}
+            />
 
             {/* Asistente Oficial de Soporte y Onboarding (Concierge Customer Success) */}
             <button
@@ -2353,7 +2418,7 @@ ${textoPdf || '{{texto_pdf}}'}
               title="Abrir Asistente Oficial de Soporte y Onboarding"
             >
               <HelpCircle className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Asistente & Soporte</span>
+              <span className="hidden md:inline">{t('assistantSupport', currentLanguage)}</span>
               <span className="md:hidden">Ayuda</span>
             </button>
 
@@ -2395,9 +2460,9 @@ ${textoPdf || '{{texto_pdf}}'}
               <span className="font-mono text-amber-300 font-black text-xs">
                 {userTokenBalance.toLocaleString()}
               </span>
-              <span className="hidden sm:inline text-[11px] text-slate-300">Tokens</span>
+              <span className="hidden sm:inline text-[11px] text-slate-300">{t('tokensBadge', currentLanguage)}</span>
               <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wide">
-                + Comprar
+                + {t('buyTokens', currentLanguage)}
               </span>
             </button>
 
@@ -2408,16 +2473,20 @@ ${textoPdf || '{{texto_pdf}}'}
               title="Compartir directo a redes sociales y generar tráfico orgánico"
             >
               <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-              <span>🚀 Compartir</span>
+              <span>{t('shareViral', currentLanguage)}</span>
             </button>
 
+            {/* EMPIEZA AHORA ANTES DE USAR O VER · BOTÓN ACCESO */}
             <button
               type="button"
               onClick={() => setActiveModule('paypal-monetization')}
-              className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-amber-600 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-2 shadow-[0_4px_16px_rgba(245,158,11,0.4)] hover:shadow-[0_6px_22px_rgba(245,158,11,0.6)] transition-all transform hover:scale-105 cursor-pointer border border-amber-600/40"
+              title="Empieza ahora antes de usar o ver - Botón Acceso"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Suscríbete ahora</span>
+              <Zap className="w-4 h-4 text-slate-950 fill-current animate-pulse" />
+              <span className="uppercase tracking-wide font-black">
+                {t('subscribeNow', currentLanguage)}
+              </span>
             </button>
           </div>
         </div>
@@ -2456,16 +2525,16 @@ ${textoPdf || '{{texto_pdf}}'}
               className="px-3.5 py-1.5 rounded-xl bg-slate-950 hover:bg-amber-500 hover:text-slate-950 text-white font-black text-xs flex items-center gap-1.5 border border-amber-400/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
               title="Entrar ahora a este módulo de trabajo"
             >
-              <span>Entrar Ahora</span>
+              <span>{t('enterNow', currentLanguage)}</span>
               <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
             </button>
 
             <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-extrabold flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Videos Sin Límite de Tiempo</span>
+              <span>{t('unlimitedVideos', currentLanguage)}</span>
             </span>
             <span className="hidden xl:inline-flex px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-900 text-xs font-bold">
-              1,200 Fotos HD · 12 PDFs Incluidos
+              {t('photosCount', currentLanguage)}
             </span>
           </div>
         </div>
@@ -2486,6 +2555,7 @@ ${textoPdf || '{{texto_pdf}}'}
             onTestearPago={() => setIsBuyTokensModalOpen(true)}
             userTokenBalance={userTokenBalance}
             isGenerating={isGeneratingVideoBook || isExportingBookMp4}
+            language={currentLanguage}
           />
         </div>
 
@@ -5881,25 +5951,56 @@ ${textoPdf || '{{texto_pdf}}'}
                           </div>
                         </div>
 
-                        {/* Shot Keyframe Image Preview or Placeholder */}
+                        {/* Shot Keyframe Image Preview with Automatic Cinematic Ken Burns */}
                         {shot.imageUrl ? (
-                          <div className="relative rounded-lg overflow-hidden border border-white/10 bg-[#0A0B0E] aspect-video group">
+                          <div className="relative rounded-lg overflow-hidden border border-white/10 bg-[#0A0B0E] aspect-video group shadow-inner">
                             <img
                               src={shot.imageUrl}
                               alt={shot.headlineText}
-                              className="w-full h-full object-cover"
+                              className={`w-full h-full object-cover ${
+                                isCurrent
+                                  ? shot.cameraMotion?.toLowerCase().includes('zoom-out')
+                                    ? 'kenburns-zoom-out'
+                                    : shot.cameraMotion?.toLowerCase().includes('pan-right')
+                                      ? 'kenburns-pan-right'
+                                      : shot.cameraMotion?.toLowerCase().includes('pan-left')
+                                        ? 'kenburns-pan-left'
+                                        : 'kenburns-zoom-in'
+                                  : idx % 4 === 0
+                                    ? 'kenburns-zoom-in opacity-95 group-hover:opacity-100'
+                                    : idx % 4 === 1
+                                      ? 'kenburns-pan-left opacity-95 group-hover:opacity-100'
+                                      : idx % 4 === 2
+                                        ? 'kenburns-zoom-out opacity-95 group-hover:opacity-100'
+                                        : 'kenburns-pan-right opacity-95 group-hover:opacity-100'
+                              }`}
                             />
-                            <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent flex items-center justify-between gap-2">
-                              <span className="text-[11px] font-mono text-amber-300">
-                                Imagen integrada en video
+                            {/* Ken Burns Live Dynamic Motion Pill */}
+                            <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 px-2 py-0.5 rounded bg-black/85 backdrop-blur-sm border border-amber-500/50 text-[10px] font-mono text-amber-300 font-extrabold shadow-md">
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isCurrent ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'
+                                }`}
+                              />
+                              <span>
+                                {isCurrent
+                                  ? `KEN BURNS ACTIVO · ${(shot.cameraMotion || 'ZOOM IN').toUpperCase()}`
+                                  : `KEN BURNS AUTOMÁTICO · ${(shot.cameraMotion || 'DINÁMICO').toUpperCase()}`}
+                              </span>
+                            </div>
+
+                            <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/90 via-black/40 to-transparent flex items-center justify-between gap-2 z-10">
+                              <span className="text-[11px] font-mono text-amber-300 flex items-center gap-1">
+                                <Sparkles className="w-3 h-3 text-amber-400" />
+                                Movimiento Cinematográfico
                               </span>
                               <a
                                 href={shot.imageUrl}
                                 download={`plano-0${shot.shotNumber}-imagen.png`}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-black/75 text-[11px] text-white hover:text-amber-300 border border-white/15"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-black/80 text-[11px] text-white hover:text-amber-300 border border-white/20 transition-colors"
                               >
                                 <Download className="w-3 h-3" />
-                                Descargar imagen
+                                Descargar
                               </a>
                             </div>
                           </div>
@@ -6052,6 +6153,7 @@ ${textoPdf || '{{texto_pdf}}'}
         onClose={() => setIsBuyTokensModalOpen(false)}
         currentBalance={userTokenBalance}
         onTokensPurchased={handleTokensPurchased}
+        language={currentLanguage}
       />
 
       {/* Social Share & Viral Traffic + Real PayPal Test Modal */}
@@ -6061,6 +6163,7 @@ ${textoPdf || '{{texto_pdf}}'}
         title={videoBook.bookTitle || 'KINETIX ESTUDIO IA'}
         subtitle={videoBook.authorOrSource || videoBook.subtitle || 'Audiolibros, Guiones & Locución Neuronal'}
         onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+        language={currentLanguage}
       />
 
       {/* Quiet Studio Footer */}

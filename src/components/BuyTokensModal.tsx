@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { X, Check, Loader2, Sparkles, ShieldCheck, ExternalLink, Zap } from 'lucide-react';
 
+import { SupportedLanguage, t } from '../utils/i18n';
+
 export interface TokenPackage {
   id: string;
   price: number;
@@ -21,6 +23,7 @@ interface BuyTokensModalProps {
   onClose: () => void;
   currentBalance: number;
   onTokensPurchased: (tokensToAdd: number, amountPaid: number, packageName: string) => void;
+  language?: SupportedLanguage;
 }
 
 export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
@@ -28,6 +31,7 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
   onClose,
   currentBalance,
   onTokensPurchased,
+  language = 'en',
 }) => {
   const [selectedPackage, setSelectedPackage] = useState<TokenPackage>(TOKEN_PACKAGES[0]);
   const [isLoading, setIsLoading] = useState<boolean>(false);

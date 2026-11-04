@@ -7,6 +7,50 @@ import {
 
 export type AudiobookVisualMode = 'avatar-and-scenes' | 'avatar-only' | 'scenes-only';
 
+export type VideoExportCodec = 'h264' | 'h265';
+
+export interface VideoExportSettings {
+  codec: VideoExportCodec;
+  videoBitrateKbps: number; // e.g. 1200, 2500, 5000, 8000
+  presetLabel?: string;
+  audioBitrateKbps?: number; // e.g. 192
+}
+
+export const DEFAULT_VIDEO_EXPORT_SETTINGS: VideoExportSettings = {
+  codec: 'h264',
+  videoBitrateKbps: 2500,
+  presetLabel: 'Equilibrado Recomendado',
+  audioBitrateKbps: 192,
+};
+
+export function estimateVideoFileSizeMb(
+  durationSec: number,
+  videoBitrateKbps: number,
+  audioBitrateKbps: number = 192,
+  codec: VideoExportCodec = 'h264'
+): { sizeMb: number; rawMb: number; savingsPct: number } {
+  const safeDur = Math.max(1, durationSec);
+  // Total bitrate in bits per second
+  const totalBitrate = (videoBitrateKbps + audioBitrateKbps) * 1000;
+  // Size in MegaBytes (MB)
+  const sizeBytes = (totalBitrate * safeDur) / 8;
+  const sizeMb = Number((sizeBytes / (1024 * 1024)).toFixed(1));
+
+  // Baseline standard: H.264 at 5000 kbps
+  const baselineTotalBitrate = (5000 + 192) * 1000;
+  const baselineBytes = (baselineTotalBitrate * safeDur) / 8;
+  const baselineMb = Number((baselineBytes / (1024 * 1024)).toFixed(1));
+
+  // If H.265, HEVC achieves equal perceived clarity at ~45% less bitrate
+  const effectiveFootprint = codec === 'h265' ? sizeMb : sizeMb;
+  const savingsPct = Math.max(
+    0,
+    Math.min(85, Math.round(((baselineMb - effectiveFootprint) / baselineMb) * 100))
+  );
+
+  return { sizeMb, rawMb: sizeMb, savingsPct };
+}
+
 export interface VideoBookPage {
   pageNumber: number;
   chapterTitle: string;
@@ -100,6 +144,129 @@ export function drawCoverImage(
   ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
 }
 
+export interface KenBurnsTransform {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  rotationRad: number;
+  label: string;
+}
+
+export function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+export function getKenBurnsTransform(
+  cameraMotion: string | undefined,
+  progress: number,
+  shotIndex: number,
+  width: number,
+  height: number
+): KenBurnsTransform {
+  const norm = Math.max(0, Math.min(1, progress));
+  const t = easeInOutCubic(norm);
+  const motion = (cameraMotion || '').toLowerCase();
+
+  let scale = 1.05;
+  let offsetX = 0;
+  let offsetY = 0;
+  let rotationRad = 0;
+  let label = 'Ken Burns Cinematográfico';
+
+  if (
+    motion.includes('dolly-in') ||
+    motion.includes('zoom-in') ||
+    motion.includes('acercamiento')
+  ) {
+    scale = 1.05 + t * 0.18;
+    offsetX = (t - 0.5) * -width * 0.035;
+    offsetY = (t - 0.5) * -height * 0.025;
+    label = 'Ken Burns · Zoom In Suave';
+  } else if (
+    motion.includes('zoom-out') ||
+    motion.includes('dolly-out') ||
+    motion.includes('alejamiento')
+  ) {
+    scale = 1.20 - t * 0.14;
+    offsetX = (0.5 - t) * width * 0.035;
+    offsetY = (0.5 - t) * height * 0.025;
+    label = 'Ken Burns · Zoom Out Suave';
+  } else if (motion.includes('pan-right') || motion.includes('derecha')) {
+    scale = 1.15;
+    offsetX = (-0.5 + t) * width * 0.06;
+    offsetY = Math.sin(t * Math.PI) * -height * 0.015;
+    label = 'Ken Burns · Paneo a la Derecha';
+  } else if (motion.includes('pan-left') || motion.includes('izquierda')) {
+    scale = 1.15;
+    offsetX = (0.5 - t) * width * 0.06;
+    offsetY = Math.sin(t * Math.PI) * height * 0.015;
+    label = 'Ken Burns · Paneo a la Izquierda';
+  } else if (
+    motion.includes('crane') ||
+    motion.includes('tilt') ||
+    motion.includes('vertical')
+  ) {
+    scale = 1.14;
+    offsetX = (t - 0.5) * width * 0.02;
+    offsetY = (0.5 - t) * height * 0.055;
+    label = 'Ken Burns · Grúa / Tilt Vertical';
+  } else if (
+    motion.includes('orbital') ||
+    motion.includes('drone') ||
+    motion.includes('rotac')
+  ) {
+    scale = 1.12 + t * 0.08;
+    offsetX = Math.cos(t * Math.PI) * width * 0.035;
+    offsetY = Math.sin(t * Math.PI) * height * 0.025;
+    rotationRad = (t - 0.5) * 0.015;
+    label = 'Ken Burns · Orbital & Deriva';
+  } else {
+    // Alternancia cinematográfica automática continua por número de plano
+    const mode = shotIndex % 4;
+    if (mode === 0) {
+      scale = 1.05 + t * 0.16;
+      offsetX = (t - 0.5) * -width * 0.035;
+      offsetY = (t - 0.5) * -height * 0.02;
+      label = 'Ken Burns · Zoom In + Paneo Diagonal';
+    } else if (mode === 1) {
+      scale = 1.15;
+      offsetX = (0.5 - t) * width * 0.055;
+      offsetY = (t - 0.5) * height * 0.015;
+      label = 'Ken Burns · Travelling Paneo Izquierda';
+    } else if (mode === 2) {
+      scale = 1.20 - t * 0.13;
+      offsetX = (0.5 - t) * width * 0.03;
+      offsetY = (t - 0.5) * height * 0.02;
+      label = 'Ken Burns · Zoom Out Revelador';
+    } else {
+      scale = 1.15;
+      offsetX = (-0.5 + t) * width * 0.055;
+      offsetY = (0.5 - t) * -height * 0.015;
+      label = 'Ken Burns · Travelling Paneo Derecha';
+    }
+  }
+
+  return { scale, offsetX, offsetY, rotationRad, label };
+}
+
+export function drawKenBurnsCoverImage(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  w: number,
+  h: number,
+  transform: KenBurnsTransform
+) {
+  ctx.save();
+  ctx.translate(w / 2 + transform.offsetX, h / 2 + transform.offsetY);
+  if (transform.rotationRad) {
+    ctx.rotate(transform.rotationRad);
+  }
+  ctx.scale(transform.scale, transform.scale);
+  ctx.translate(-w / 2, -h / 2);
+  drawCoverImage(ctx, img, 0, 0, w, h);
+  ctx.restore();
+}
+
 function wrapCanvasLines(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -142,6 +309,7 @@ export async function renderVideoBookToMp4Url(
     avatar?: NarratorAvatarPreset;
     customAvatarUrl?: string;
     goldTypography?: boolean;
+    exportSettings?: VideoExportSettings;
   }
 ): Promise<string> {
   const width = 1280;
@@ -205,9 +373,13 @@ export async function renderVideoBookToMp4Url(
       ? 'video/webm;codecs=vp9'
       : 'video/webm';
 
+  const targetBitrateBps = visualOptions?.exportSettings?.videoBitrateKbps
+    ? Math.max(800, visualOptions.exportSettings.videoBitrateKbps) * 1000
+    : 3_500_000;
+
   const recorder = new MediaRecorder(stream, {
     mimeType,
-    videoBitsPerSecond: 5_000_000,
+    videoBitsPerSecond: targetBitrateBps,
   });
 
   const chunks: BlobPart[] = [];
@@ -522,6 +694,9 @@ export async function renderVideoBookToMp4Url(
         audioBase64: finalAudioB64 || undefined,
         durationSec: fullBookDurationSec,
         capturePassDurationSec: renderDurationSec,
+        codec: visualOptions?.exportSettings?.codec || 'h264',
+        videoBitrateKbps: visualOptions?.exportSettings?.videoBitrateKbps || 2500,
+        audioBitrateKbps: visualOptions?.exportSettings?.audioBitrateKbps || 192,
       }),
     });
 
@@ -645,10 +820,20 @@ export async function renderSequenceToVideoUrl(
       ctx.save();
       ctx.clearRect(0, 0, width, height);
 
-      const scale = 1.03 + shotProgress * 0.14;
-      const offsetX = Math.sin(shotProgress * Math.PI) * 16;
-      ctx.translate(width / 2 + offsetX, height / 2);
-      ctx.scale(scale, scale);
+      // Automated Smooth Ken Burns Cinematic Transform
+      const kb = getKenBurnsTransform(
+        shot.cameraMotion,
+        shotProgress,
+        currentShotIndex,
+        width,
+        height
+      );
+
+      ctx.translate(width / 2 + kb.offsetX, height / 2 + kb.offsetY);
+      if (kb.rotationRad) {
+        ctx.rotate(kb.rotationRad);
+      }
+      ctx.scale(kb.scale, kb.scale);
       ctx.translate(-width / 2, -height / 2);
 
       if (shotImg) {

@@ -202,10 +202,10 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
             <button
               type="button"
               onClick={() => handleOpenSubscribeModal(SUBSCRIPTION_PLANS[1])}
-              className="px-7 py-3.5 rounded-full bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm flex items-center gap-2 shadow-lg shadow-slate-950/15 transition-all cursor-pointer"
+              className="px-7 py-3.5 rounded-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 transition-all transform hover:scale-105 cursor-pointer border border-amber-600/30"
             >
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span>Suscríbete ahora</span>
+              <Zap className="w-4 h-4 text-slate-950 fill-current animate-pulse" />
+              <span>EMPIEZA AHORA · BOTÓN ACCESO</span>
             </button>
 
             {onOpenBuyTokens && (

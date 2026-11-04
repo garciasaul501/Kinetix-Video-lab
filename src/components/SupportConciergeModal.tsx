@@ -80,8 +80,8 @@ const QUICK_PROMPTS = [
     prompt: '¿Cómo elijo y vinculo las fotos de los 12 nichos temáticos a los capítulos?',
   },
   {
-    label: '👑 Modelo Letras Oro',
-    prompt: '¿Cómo activo el modelo moderno con todas las letras color oro 24K?',
+    label: '⚡ Acceso Inmediato Pro',
+    prompt: '¿Cómo accedo a las herramientas pro y empezar ahora antes de usar o ver?',
   },
   {
     label: '🛡️ Acceso Administrador',

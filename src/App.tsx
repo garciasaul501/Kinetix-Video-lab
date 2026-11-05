@@ -36,6 +36,7 @@ import {
   Heart,
   LogIn,
   Zap,
+  Play,
 } from 'lucide-react';
 import { pcmBase64ToWav, createSyntheticToneWav } from './utils/audioWav';
 import {
@@ -704,6 +705,10 @@ export default function App() {
   const [bookMp4Progress, setBookMp4Progress] = useState<number>(0);
   const [exportedBookMp4Url, setExportedBookMp4Url] = useState<string | null>(null);
 
+  // --- VIDEOBOOK VIEW MODE: 'player' (Pantalla de Reproducir) or 'creator' (Creador PDF) ---
+  const [videobookViewMode, setVideobookViewMode] = useState<'player' | 'creator'>('creator');
+  const [playerAutoPlayTrigger, setPlayerAutoPlayTrigger] = useState<number>(0);
+
   // --- AUDIOBOOK MP3 / MP4 FOLDER VAULT STATE ---
   const [customFolders, setCustomFolders] = useState<string[]>(() =>
     loadCustomFoldersFromStorage()
@@ -1083,11 +1088,22 @@ ${textoPdf || '{{texto_pdf}}'}
         setNarrationScript(createdBook.fullNarration);
       }
 
+      // Automatically present reproduction screen and start playing
+      setVideobookViewMode('player');
+      setPlayerAutoPlayTrigger((prev) => prev + 1);
+
       toast.dismiss(toastId);
       toast.success(
         '¡Audiolibro Creado con Éxito!',
-        `Se han generado ${createdBook.pages.length} capítulos sincronizados con avatar y escenas.`
+        `Se han generado ${createdBook.pages.length} capítulos sincronizados. Mostrando pantalla de reproducción.`
       );
+
+      setTimeout(() => {
+        const playerEl = document.getElementById('audiobook-master-player');
+        if (playerEl) {
+          playerEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
 
       if (autoIllustrateAndNarrate) {
         await Promise.all([
@@ -2175,21 +2191,21 @@ ${textoPdf || '{{texto_pdf}}'}
   // Action Handlers for Unified Action Toolbar
   const handleToolbarCrear = () => {
     setActiveModule('videobook');
+    setVideobookViewMode('creator');
     setTimeout(() => {
       const stage = document.getElementById('audiobook-creation-stage');
-      if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+      if (stage) stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 80);
   };
 
   const handleToolbarReproducir = () => {
     setActiveModule('videobook');
+    setVideobookViewMode('player');
+    setPlayerAutoPlayTrigger((prev) => prev + 1);
     setTimeout(() => {
       const player = document.getElementById('audiobook-master-player');
       if (player) {
-        player.scrollIntoView({ behavior: 'smooth' });
-      } else {
-        const stage = document.getElementById('audiobook-creation-stage');
-        if (stage) stage.scrollIntoView({ behavior: 'smooth' });
+        player.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     }, 80);
   };
@@ -2635,11 +2651,11 @@ ${textoPdf || '{{texto_pdf}}'}
             PRIMARY SIMPLE WORKFLOW: AUDIOLIBROS Y VIDEO-LIBROS IA DESDE PDF
            ===================================================================== */}
         {activeModule === 'videobook' && (
-          <div className="space-y-8">
+          <div className="flex flex-col space-y-8">
             {/* Overview of Studio Modules with Clear Short Descriptions for Easy Reading & SEO */}
             <section
               aria-label="Resumen de módulos del estudio"
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
+              className="order-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
             >
               {STUDIO_MODULE_LIST.slice(0, 4).map((mod) => {
                 const isCurrent = activeModule === mod.id;
@@ -2670,8 +2686,128 @@ ${textoPdf || '{{texto_pdf}}'}
               })}
             </section>
 
+            {/* View Mode Switcher: Pantalla de Reproducir vs Creador desde PDF */}
+            <div className="order-2 flex flex-wrap items-center justify-between gap-4 bg-white border border-slate-300 p-4 rounded-2xl shadow-xs">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-2.5 rounded-xl border ${
+                    videobookViewMode === 'player'
+                      ? 'bg-amber-100 border-amber-300 text-amber-800'
+                      : 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                  }`}
+                >
+                  {videobookViewMode === 'player' ? (
+                    <Play className="w-5 h-5 fill-amber-600 text-amber-600" />
+                  ) : (
+                    <BookOpen className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-extrabold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      {videobookViewMode === 'player'
+                        ? 'Pantalla de Reproducir Activa'
+                        : 'Creador de Audiolibro desde PDF'}
+                    </span>
+                    {videoBook.pages.length > 0 && (
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        {videoBook.bookTitle || 'Audiolibro'} ({videoBook.pages.length} cap.)
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-950 mt-0.5">
+                    {videobookViewMode === 'player'
+                      ? 'Pantalla de Reproducción en Vivo con Avatar y Escenas'
+                      : 'Configurar y Convertir Documento PDF a Audiolibro'}
+                  </h2>
+                </div>
+              </div>
+
+              <div className="inline-flex p-1 bg-slate-100 border border-slate-300 rounded-xl shadow-inner">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideobookViewMode('player');
+                    setPlayerAutoPlayTrigger((prev) => prev + 1);
+                    setTimeout(() => {
+                      const el = document.getElementById('audiobook-master-player');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 50);
+                  }}
+                  className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                    videobookViewMode === 'player'
+                      ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-slate-950 shadow-md font-black transform scale-[1.02]'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>Pantalla de Reproducir</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVideobookViewMode('creator');
+                    setTimeout(() => {
+                      const el = document.getElementById('audiobook-creation-stage');
+                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 50);
+                  }}
+                  className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
+                    videobookViewMode === 'creator'
+                      ? 'bg-slate-950 text-white shadow-md font-black transform scale-[1.02]'
+                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/60'
+                  }`}
+                >
+                  <BookOpen className="w-4 h-4" />
+                  <span>Creador / Subir PDF</span>
+                </button>
+              </div>
+            </div>
+
             {/* Simple 3-Step PDF to Spoken Audiobook Creator Card — Ultra-Modern Surface */}
-            <section className="bg-white border border-slate-300 rounded-2xl p-6 sm:p-8 shadow-xs">
+            <section
+              id="audiobook-creator-card"
+              className={`bg-white border border-slate-300 rounded-2xl p-6 sm:p-8 shadow-xs transition-all ${
+                videobookViewMode === 'creator' ? 'order-3' : 'order-5'
+              }`}
+            >
+              {videoBook.pages.length > 0 && videobookViewMode === 'creator' && (
+                <div className="mb-6 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-300 p-3.5 rounded-xl shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-lg bg-amber-500 text-slate-950 font-black">
+                      <Play className="w-4 h-4 fill-current" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-950">
+                        Audiolibro creado y listo para escuchar:{' '}
+                        <span className="text-amber-700 font-bold">
+                          "{videoBook.bookTitle || 'Audiolibro'}"
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-slate-600">
+                        Contiene {videoBook.pages.length} capítulos sincronizados con narración y escenas Ken Burns.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVideobookViewMode('player');
+                      setPlayerAutoPlayTrigger((prev) => prev + 1);
+                      setTimeout(() => {
+                        const player = document.getElementById('audiobook-master-player');
+                        if (player)
+                          player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }, 80);
+                    }}
+                    className="text-xs px-3.5 py-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-white font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current text-amber-400" />
+                    <span>Ver Pantalla de Reproducir Ahora</span>
+                  </button>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6 mb-6">
                 <div>
                   <span className="text-xs font-mono font-extrabold uppercase tracking-widest text-indigo-700">
@@ -2685,15 +2821,51 @@ ${textoPdf || '{{texto_pdf}}'}
                   </p>
                 </div>
 
-                {/* Quick Actions: Entrar Ahora + 1,200 Photos + Folder Toggle + Subscribe */}
+                {/* Quick Actions: Reproducir video + Entrar Ahora + 1,200 Photos + Folder Toggle + Subscribe */}
                 <div className="flex flex-wrap items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVideobookViewMode('player');
+                      setPlayerAutoPlayTrigger((prev) => prev + 1);
+                      setTimeout(() => {
+                        const player = document.getElementById('audiobook-master-player');
+                        if (player) {
+                          player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                      }, 60);
+                    }}
+                    disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                    className={`text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-2 font-black transition-all cursor-pointer ${
+                      !isGeneratingVideoBook && videoBook.pages.length > 0
+                        ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.4)] transform hover:scale-105 ring-2 ring-amber-400'
+                        : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                    }`}
+                  >
+                    {isGeneratingVideoBook ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
+                        <span>Generando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play
+                          className={`w-4 h-4 ${
+                            videoBook.pages.length > 0 ? 'fill-current text-slate-950' : 'text-slate-400'
+                          }`}
+                        />
+                        <span>Reproducir video</span>
+                      </>
+                    )}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => {
                       const stage = document.getElementById('audiobook-creation-stage');
                       if (stage) stage.scrollIntoView({ behavior: 'smooth' });
                     }}
-                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black shadow-[0_0_15px_rgba(245,158,11,0.35)] flex items-center gap-1.5 transition-all cursor-pointer transform hover:scale-105"
+                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-extrabold flex items-center gap-1.5 transition-all cursor-pointer"
                   >
                     <LogIn className="w-4 h-4" />
                     <span>Entrar Ahora a Crear</span>
@@ -3067,6 +3239,50 @@ ${textoPdf || '{{texto_pdf}}'}
                       <span>Generar Completo (Voz + Video)</span>
                     </button>
 
+                    {/* Botón 'Reproducir video' - Se activa automáticamente al finalizar isGeneratingVideoBook */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVideobookViewMode('player');
+                        setPlayerAutoPlayTrigger((prev) => prev + 1);
+                        setTimeout(() => {
+                          const player = document.getElementById('audiobook-master-player');
+                          if (player) {
+                            player.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                          }
+                        }, 50);
+                      }}
+                      disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                      className={`w-full py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                        !isGeneratingVideoBook && videoBook.pages.length > 0
+                          ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 shadow-[0_0_18px_rgba(245,158,11,0.45)] ring-2 ring-amber-400/90 transform hover:scale-[1.02]'
+                          : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      {isGeneratingVideoBook ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
+                          <span className="text-slate-700">Generando Audiolibro IA...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play
+                            className={`w-4 h-4 ${
+                              videoBook.pages.length > 0
+                                ? 'fill-current text-slate-950'
+                                : 'text-slate-400'
+                            }`}
+                          />
+                          <span>Reproducir video</span>
+                          {videoBook.pages.length > 0 && (
+                            <span className="ml-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950 text-amber-300 shadow-xs">
+                              Listo
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </button>
+
                     <div className="grid grid-cols-2 gap-2 pt-0.5">
                       <button
                         type="button"
@@ -3109,106 +3325,178 @@ ${textoPdf || '{{texto_pdf}}'}
 
             {/* Folder Vault for Saving & Downloading Audiobooks in MP3 or MP4 */}
             {showAudiobookFolder && (
-              <AudiobookFolderVault
-                savedAudiobooks={savedAudiobooks}
-                customFolders={customFolders}
-                onCreateFolder={(newFolderName) => {
-                  if (!customFolders.includes(newFolderName)) {
-                    const next = [...customFolders, newFolderName];
-                    setCustomFolders(next);
-                    saveCustomFoldersToStorage(next);
+              <div className="order-4">
+                <AudiobookFolderVault
+                  savedAudiobooks={savedAudiobooks}
+                  customFolders={customFolders}
+                  onCreateFolder={(newFolderName) => {
+                    if (!customFolders.includes(newFolderName)) {
+                      const next = [...customFolders, newFolderName];
+                      setCustomFolders(next);
+                      saveCustomFoldersToStorage(next);
+                    }
+                  }}
+                  onSaveCurrentAudiobook={handleSaveCurrentAudiobookToFolder}
+                  onRestoreAudiobookToStudio={(item) => {
+                    setVideoBook(item.videoBook);
+                    setPageImages(item.pageImages || {});
+                    setActiveBookPageIdx(0);
+                    setAudiobookVisualMode(item.visualMode || 'avatar-and-scenes');
+                    const foundAv = NARRATOR_AVATAR_PRESETS.find(
+                      (a) => a.id === item.avatarId
+                    );
+                    if (foundAv) {
+                      setSelectedAvatar(foundAv);
+                      setVoiceName(foundAv.voiceName);
+                      setVoiceGender(foundAv.gender);
+                    }
+                    if (item.videoBook.fullNarration) {
+                      setNarrationScript(item.videoBook.fullNarration);
+                    }
+                    setVideobookViewMode('player');
+                    setPlayerAutoPlayTrigger((prev) => prev + 1);
+                    setTimeout(() => {
+                      const playerEl = document.getElementById('audiobook-master-player');
+                      if (playerEl) {
+                        playerEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }, 100);
+                    toast.success(
+                      'Audiolibro Cargado en Reproductor',
+                      `"${item.title}" listo para reproducir.`
+                    );
+                  }}
+                  onMoveToFolder={(itemId, newFolder) => {
+                    setSavedAudiobooks((prev) => {
+                      const next = prev.map((it) =>
+                        it.id === itemId ? { ...it, folderName: newFolder } : it
+                      );
+                      saveAudiobooksMetaToStorage(next);
+                      return next;
+                    });
+                  }}
+                  onToggleFavorite={(itemId) => {
+                    setSavedAudiobooks((prev) => {
+                      const next = prev.map((it) =>
+                        it.id === itemId ? { ...it, isFavorite: !it.isFavorite } : it
+                      );
+                      saveAudiobooksMetaToStorage(next);
+                      return next;
+                    });
+                  }}
+                  onRenameAudiobook={(itemId, newTitle) => {
+                    setSavedAudiobooks((prev) => {
+                      const next = prev.map((it) =>
+                        it.id === itemId
+                          ? {
+                              ...it,
+                              title: newTitle,
+                              videoBook: { ...it.videoBook, bookTitle: newTitle },
+                            }
+                          : it
+                      );
+                      saveAudiobooksMetaToStorage(next);
+                      return next;
+                    });
+                  }}
+                  onDeleteAudiobook={(itemId) => {
+                    setSavedAudiobooks((prev) => {
+                      const next = prev.filter((it) => it.id !== itemId);
+                      saveAudiobooksMetaToStorage(next);
+                      return next;
+                    });
+                  }}
+                  onMarkBlobCached={(itemId, type, sizeLabel) => {
+                    setSavedAudiobooks((prev) => {
+                      const next = prev.map((it) =>
+                        it.id === itemId
+                          ? {
+                              ...it,
+                              hasMp3Blob: type === 'mp3' ? true : it.hasMp3Blob,
+                              hasMp4Blob: type === 'mp4' ? true : it.hasMp4Blob,
+                              fileSizeLabel: sizeLabel || it.fileSizeLabel,
+                            }
+                          : it
+                      );
+                      saveAudiobooksMetaToStorage(next);
+                      return next;
+                    });
+                  }}
+                  onSellWithPayPal={(item) =>
+                    handleOpenPayPalForBook(
+                      item.title,
+                      item.subtitle,
+                      item.coverImageUrl,
+                      item.chaptersCount
+                    )
                   }
-                }}
-                onSaveCurrentAudiobook={handleSaveCurrentAudiobookToFolder}
-                onRestoreAudiobookToStudio={(item) => {
-                  setVideoBook(item.videoBook);
-                  setPageImages(item.pageImages || {});
-                  setActiveBookPageIdx(0);
-                  setAudiobookVisualMode(item.visualMode || 'avatar-and-scenes');
-                  const foundAv = NARRATOR_AVATAR_PRESETS.find(
-                    (a) => a.id === item.avatarId
-                  );
-                  if (foundAv) {
-                    setSelectedAvatar(foundAv);
-                    setVoiceName(foundAv.voiceName);
-                    setVoiceGender(foundAv.gender);
-                  }
-                  if (item.videoBook.fullNarration) {
-                    setNarrationScript(item.videoBook.fullNarration);
-                  }
-                }}
-                onMoveToFolder={(itemId, newFolder) => {
-                  setSavedAudiobooks((prev) => {
-                    const next = prev.map((it) =>
-                      it.id === itemId ? { ...it, folderName: newFolder } : it
-                    );
-                    saveAudiobooksMetaToStorage(next);
-                    return next;
-                  });
-                }}
-                onToggleFavorite={(itemId) => {
-                  setSavedAudiobooks((prev) => {
-                    const next = prev.map((it) =>
-                      it.id === itemId ? { ...it, isFavorite: !it.isFavorite } : it
-                    );
-                    saveAudiobooksMetaToStorage(next);
-                    return next;
-                  });
-                }}
-                onRenameAudiobook={(itemId, newTitle) => {
-                  setSavedAudiobooks((prev) => {
-                    const next = prev.map((it) =>
-                      it.id === itemId
-                        ? {
-                            ...it,
-                            title: newTitle,
-                            videoBook: { ...it.videoBook, bookTitle: newTitle },
-                          }
-                        : it
-                    );
-                    saveAudiobooksMetaToStorage(next);
-                    return next;
-                  });
-                }}
-                onDeleteAudiobook={(itemId) => {
-                  setSavedAudiobooks((prev) => {
-                    const next = prev.filter((it) => it.id !== itemId);
-                    saveAudiobooksMetaToStorage(next);
-                    return next;
-                  });
-                }}
-                onMarkBlobCached={(itemId, type, sizeLabel) => {
-                  setSavedAudiobooks((prev) => {
-                    const next = prev.map((it) =>
-                      it.id === itemId
-                        ? {
-                            ...it,
-                            hasMp3Blob: type === 'mp3' ? true : it.hasMp3Blob,
-                            hasMp4Blob: type === 'mp4' ? true : it.hasMp4Blob,
-                            fileSizeLabel: sizeLabel || it.fileSizeLabel,
-                          }
-                        : it
-                    );
-                    saveAudiobooksMetaToStorage(next);
-                    return next;
-                  });
-                }}
-                onSellWithPayPal={(item) =>
-                  handleOpenPayPalForBook(
-                    item.title,
-                    item.subtitle,
-                    item.coverImageUrl,
-                    item.chaptersCount
-                  )
-                }
-                currentBookTitle={videoBook.bookTitle}
-                isSavingToFolder={isSavingToFolder}
-                saveProgressPct={saveFolderProgress}
-              />
+                  currentBookTitle={videoBook.bookTitle}
+                  isSavingToFolder={isSavingToFolder}
+                  saveProgressPct={saveFolderProgress}
+                />
+              </div>
             )}
 
             {/* Interactive Spoken Audiobook & Video-eBook Stage with Talking Avatar + 1,200 Topic Scenes + Unlimited Chapters */}
-            <div id="audiobook-master-player">
+            <div
+              id="audiobook-master-player"
+              className={`scroll-mt-6 space-y-4 transition-all ${
+                videobookViewMode === 'player' ? 'order-3' : 'order-5'
+              }`}
+            >
+              {videobookViewMode === 'player' && (
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-50 border border-amber-300 p-4 rounded-2xl shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-400 flex items-center justify-center text-slate-950 font-black shadow-xs">
+                      <Play className="w-5 h-5 fill-current" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-900 bg-amber-200/70 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Pantalla de Reproducir Audiolibro
+                        </span>
+                        <span className="text-xs font-bold text-slate-700">
+                          {videoBook.pages.length} Capítulos Sincronizados
+                        </span>
+                      </div>
+                      <h2 className="text-base sm:text-lg font-black text-slate-950 mt-0.5">
+                        {videoBook.bookTitle || 'Audiolibro IA'}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVideobookViewMode('creator');
+                        setTimeout(() => {
+                          const stage = document.getElementById('audiobook-creation-stage');
+                          if (stage) stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }, 80);
+                      }}
+                      className="text-xs px-3.5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                    >
+                      <BookOpen className="w-4 h-4 text-slate-700" />
+                      <span>+ Crear Otro desde PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAudiobookFolder(!showAudiobookFolder)}
+                      className={`text-xs px-3.5 py-2.5 rounded-xl font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer shadow-xs ${
+                        showAudiobookFolder
+                          ? 'bg-slate-950 text-white border-slate-950'
+                          : 'bg-white text-slate-950 border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                      <span>Biblioteca ({savedAudiobooks.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <VideoBookPlayer
               videoBook={videoBook}
               onAddUnlimitedChapter={() => {
@@ -3305,6 +3593,7 @@ ${textoPdf || '{{texto_pdf}}'}
                   videoBook.pages.length
                 )
               }
+              autoPlayTrigger={playerAutoPlayTrigger}
             />
             </div>
           </div>

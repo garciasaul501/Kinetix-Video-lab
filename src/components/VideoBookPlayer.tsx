@@ -85,6 +85,7 @@ interface VideoBookPlayerProps {
   onSellWithPayPal?: () => void;
   onAddUnlimitedChapter?: () => void;
   onUpdateChapterDuration?: (pageIdx: number, newDurationSec: number) => void;
+  autoPlayTrigger?: number;
 }
 
 export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
@@ -119,12 +120,14 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   onSellWithPayPal,
   onAddUnlimitedChapter,
   onUpdateChapterDuration,
+  autoPlayTrigger,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [readingFontSize, setReadingFontSize] = useState<'normal' | 'large' | 'xlarge'>('large');
+
 
   // Video Export Settings (Bitrate & Codec H.264 / H.265) State
   const [isExportSettingsOpen, setIsExportSettingsOpen] = useState(false);
@@ -175,6 +178,20 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     if (!takes.length) return null;
     return takes.find((t) => t.id === selectedTakeId) || takes[0];
   }, [takes, selectedTakeId]);
+
+  // Trigger autoplay when an audiobook is freshly created or requested
+  useEffect(() => {
+    if (autoPlayTrigger && autoPlayTrigger > 0) {
+      setCurrentTime(0);
+      lastSpokenPageRef.current = null;
+      setIsPlaying(true);
+      onPageChange(0);
+      if (activeTake && audioRef.current) {
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {});
+      }
+    }
+  }, [autoPlayTrigger]);
 
   const filteredAvatars = useMemo(() => {
     return NARRATOR_AVATAR_PRESETS.filter((av) => {

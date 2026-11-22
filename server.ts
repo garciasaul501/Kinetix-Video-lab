@@ -10,6 +10,7 @@ import zlib from 'zlib';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
+import JSZip from 'jszip';
 import { GoogleGenAI, Type, ThinkingLevel, GenerateVideosOperation } from '@google/genai';
 
 const execFileAsync = promisify(execFile);
@@ -715,7 +716,20 @@ async function startServer() {
     : 3000;
   const PORT = cliPort || envPort || 3000;
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '100mb' }));
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+      res.status(413).json({
+        error: 'El archivo es demasiado grande (máximo 70 MB). Intenta con un archivo más liviano o divídelo en partes.',
+      });
+      return;
+    }
+    if (err && err.type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'Formato de solicitud inválido al subir el archivo.' });
+      return;
+    }
+    next(err);
+  });
 
   // 0. Simple 1-Click PDF to Video-eBook (Libro Electrónico en Video Sin Límite)
   app.post('/api/pdf-to-videobook', async (req, res) => {
@@ -872,94 +886,243 @@ Para cada uno de los ${requestedChapters} capítulos incluye:
     }
   });
 
-  // 0A. Extract Text from Uploaded PDF Document
+  // 0A. Extract Text from Uploaded Document (PDF, DOCX, TXT, MD, CSV, HTML, RTF, or Image OCR)
   app.post('/api/extract-pdf', async (req, res) => {
-    const { pdfBase64, filename = 'documento.pdf' } = req.body || {};
-    if (!pdfBase64 || typeof pdfBase64 !== 'string') {
-      res.status(400).json({ error: 'No se recibió ningún archivo PDF.' });
+    const body = req.body || {};
+    const rawBase64 = body.pdfBase64 || body.fileBase64 || body.base64Data;
+    const filename = String(body.filename || 'documento.pdf');
+    const providedMime = String(body.mimeType || '').toLowerCase();
+
+    if (!rawBase64 || typeof rawBase64 !== 'string') {
+      res.status(400).json({ error: 'No se recibió ningún archivo para procesar.' });
       return;
     }
 
-    const cleanB64 = pdfBase64.includes(',') ? pdfBase64.split(',')[1] : pdfBase64;
-    const pdfBuffer = Buffer.from(cleanB64, 'base64');
-    const tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kinetix-pdf-'));
-    const pdfPath = path.join(tmpDir, 'input.pdf');
-    const txtPath = path.join(tmpDir, 'output.txt');
+    // Parse data URI header if present
+    let detectedMime = providedMime;
+    let cleanB64 = rawBase64.trim();
+    if (cleanB64.includes(',')) {
+      const [header, payload] = cleanB64.split(',', 2);
+      cleanB64 = (payload || '').trim();
+      const mimeMatch = header.match(/data:([^;]+);base64/i);
+      if (mimeMatch && mimeMatch[1] && !detectedMime) {
+        detectedMime = mimeMatch[1].toLowerCase();
+      }
+    }
+
+    if (!cleanB64) {
+      res.status(400).json({ error: 'El archivo subido está vacío o dañado.' });
+      return;
+    }
+
+    const fileBuffer = Buffer.from(cleanB64, 'base64');
+    if (!fileBuffer || fileBuffer.length === 0) {
+      res.status(400).json({ error: 'No se pudieron decodificar los bytes del archivo.' });
+      return;
+    }
+
+    const lowerName = filename.toLowerCase();
+    const isPdf =
+      lowerName.endsWith('.pdf') ||
+      detectedMime === 'application/pdf' ||
+      fileBuffer.slice(0, 5).toString('ascii') === '%PDF-';
+    const isDocx =
+      lowerName.endsWith('.docx') ||
+      detectedMime.includes('wordprocessingml') ||
+      detectedMime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isImage =
+      detectedMime.startsWith('image/') ||
+      /\.(png|jpe?g|webp|gif|bmp)$/i.test(lowerName);
+    const isPlainLike =
+      !isPdf &&
+      !isDocx &&
+      !isImage &&
+      (detectedMime.startsWith('text/') ||
+        detectedMime === 'application/json' ||
+        /\.(txt|md|markdown|csv|json|html?|xml|rtf|srt|vtt)$/i.test(lowerName));
+
+    let tmpDir: string | null = null;
 
     try {
-      await fs.promises.writeFile(pdfPath, pdfBuffer);
-
-      // Method 1: Ghostscript txtwrite (fast, accurate UTF-8 PDF text extraction)
       let extractedText = '';
-      try {
-        await execFileAsync('gs', [
-          '-q',
-          '-dNOPAUSE',
-          '-dBATCH',
-          '-dSAFER',
-          '-sDEVICE=txtwrite',
-          `-sOutputFile=${txtPath}`,
-          pdfPath,
-        ]);
-        const gsText = await fs.promises.readFile(txtPath, 'utf8');
-        if (gsText && gsText.trim().length > 15) {
-          extractedText = gsText.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
-        }
-      } catch (_gsErr) {
-        // Continue to next extractor
-      }
 
-      // Method 2: Native PDF Stream Parser
-      if (!extractedText || extractedText.length < 20) {
-        const nativeText = extractTextFromPdfBufferNative(pdfBuffer);
-        if (nativeText.length > extractedText.length) {
-          extractedText = nativeText;
+      // CASE 1: Plain text / Markdown / HTML / RTF / CSV / JSON
+      if (isPlainLike) {
+        let rawText = fileBuffer.toString('utf8');
+        if (lowerName.endsWith('.html') || lowerName.endsWith('.htm')) {
+          rawText = rawText
+            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/&lt;/gi, '<')
+            .replace(/&gt;/gi, '>');
+        } else if (lowerName.endsWith('.rtf')) {
+          rawText = rawText
+            .replace(/\\par[d]?/g, '\n')
+            .replace(/\{\\\*?[^{}]*\}/g, ' ')
+            .replace(/\\[a-z]+\d* ?/gi, ' ')
+            .replace(/[{}]/g, ' ');
         }
+        extractedText = rawText.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
       }
-
-      // Method 3: Multimodal Gemini PDF Reading (handles scanned PDFs or complex encodings)
-      if (!extractedText || extractedText.length < 30) {
+      // CASE 2: Word (.docx) extraction via JSZip
+      else if (isDocx) {
         try {
-          const ai = getGenAIClient();
-          const geminiRes = await ai.models.generateContent({
-            model: 'gemini-4-hydrogen',
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    inlineData: {
-                      mimeType: 'application/pdf',
-                      data: cleanB64,
+          const zip = await JSZip.loadAsync(fileBuffer);
+          const docXmlFile = zip.file('word/document.xml');
+          if (docXmlFile) {
+            const xml = await docXmlFile.async('string');
+            extractedText = xml
+              .replace(/<\/w:p>/g, '\n')
+              .replace(/<w:br[^>]*\/>/g, '\n')
+              .replace(/<w:tab[^>]*\/>/g, ' ')
+              .replace(/<[^>]+>/g, '')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&apos;/g, "'")
+              .replace(/[ \t]+/g, ' ')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+          }
+        } catch (_docxErr) {
+          // Will fall back to readable text check below
+        }
+      }
+      // CASE 3: Image OCR via Gemini Multimodal
+      else if (isImage) {
+        const imgMime = detectedMime.startsWith('image/')
+          ? detectedMime
+          : lowerName.endsWith('.png')
+            ? 'image/png'
+            : lowerName.endsWith('.webp')
+              ? 'image/webp'
+              : 'image/jpeg';
+        const ocrModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+        for (const modelName of ocrModels) {
+          try {
+            const ai = getGenAIClient();
+            const geminiRes = await ai.models.generateContent({
+              model: modelName,
+              contents: [
+                {
+                  role: 'user',
+                  parts: [
+                    { inlineData: { mimeType: imgMime, data: cleanB64 } },
+                    {
+                      text: 'Transcribe todo el texto visible en esta imagen de forma clara y estructurada en español. Si es una escena o fotografía sin texto, descríbela detalladamente para narración.',
                     },
-                  },
+                  ],
+                },
+              ],
+            });
+            if (geminiRes.text && geminiRes.text.trim().length > 10) {
+              extractedText = geminiRes.text.trim();
+              break;
+            }
+          } catch (_ocrErr) {
+            // Try next fallback model
+          }
+        }
+      }
+      // CASE 4: PDF Extraction (Ghostscript -> Native Stream Parser -> Gemini Multimodal PDF OCR)
+      else {
+        tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'kinetix-pdf-'));
+        const pdfPath = path.join(tmpDir, 'input.pdf');
+        const txtPath = path.join(tmpDir, 'output.txt');
+        await fs.promises.writeFile(pdfPath, fileBuffer);
+
+        // Method 1: Ghostscript txtwrite (fast, accurate UTF-8 PDF text extraction)
+        try {
+          await execFileAsync(
+            'gs',
+            [
+              '-q',
+              '-dNOPAUSE',
+              '-dBATCH',
+              '-dSAFER',
+              '-sDEVICE=txtwrite',
+              `-sOutputFile=${txtPath}`,
+              pdfPath,
+            ],
+            { timeout: 25000, maxBuffer: 20 * 1024 * 1024 }
+          );
+          if (fs.existsSync(txtPath)) {
+            const gsText = await fs.promises.readFile(txtPath, 'utf8');
+            if (gsText && gsText.trim().length > 15) {
+              extractedText = gsText.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+            }
+          }
+        } catch (_gsErr) {
+          // Continue to next extractor
+        }
+
+        // Method 2: Native PDF Stream Parser
+        if (!extractedText || extractedText.length < 20) {
+          const nativeText = extractTextFromPdfBufferNative(fileBuffer);
+          if (nativeText.length > extractedText.length) {
+            extractedText = nativeText;
+          }
+        }
+
+        // Method 3: Multimodal Gemini PDF Reading (handles scanned PDFs or complex encodings)
+        if (!extractedText || extractedText.length < 30) {
+          const pdfModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+          for (const modelName of pdfModels) {
+            try {
+              const ai = getGenAIClient();
+              const geminiRes = await ai.models.generateContent({
+                model: modelName,
+                contents: [
                   {
-                    text: 'Extrae y transcribe de forma íntegra, limpia y estructurada todo el contenido textual relevante de este documento PDF en español.',
+                    role: 'user',
+                    parts: [
+                      {
+                        inlineData: {
+                          mimeType: 'application/pdf',
+                          data: cleanB64,
+                        },
+                      },
+                      {
+                        text: 'Extrae y transcribe de forma íntegra, limpia y estructurada todo el contenido textual relevante de este documento PDF en español.',
+                      },
+                    ],
                   },
                 ],
-              },
-            ],
-          });
-          if (geminiRes.text && geminiRes.text.trim().length > 20) {
-            extractedText = geminiRes.text.trim();
+              });
+              if (geminiRes.text && geminiRes.text.trim().length > 20) {
+                extractedText = geminiRes.text.trim();
+                break;
+              }
+            } catch (_aiErr) {
+              // Try next model
+            }
           }
-        } catch (_aiErr) {
-          // Ignore if quota exhausted
         }
       }
 
-      if (!extractedText || extractedText.trim().length < 10) {
+      if (!extractedText || extractedText.trim().length < 5) {
         extractedText = `Documento cargado (${filename}). El archivo contiene gráficos o capas escaneadas; añade o edita aquí los puntos principales que deseas transformar en producción audiovisual.`;
       }
 
       res.json({
         extractedText,
+        text: extractedText,
         filename,
+        charCount: extractedText.length,
       });
-    } catch (_err: any) {
-      res.status(500).json({ error: 'No se pudo procesar el archivo PDF.' });
+    } catch (err: any) {
+      console.error('Error in /api/extract-pdf:', err?.message || err);
+      res.status(500).json({
+        error: `No se pudo procesar el archivo "${filename}". Verifica que no esté protegido con contraseña o corrupto.`,
+      });
     } finally {
-      await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      if (tmpDir) {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   });
 
@@ -2143,6 +2306,127 @@ ${keyFeatures}
     res.json({ reply: formattedFallback });
   });
 
+  // 11B. Real Interactive AI Guide Chat Bot (Bot Chat Guía IA)
+  app.post('/api/guide-chat', async (req, res) => {
+    const { message, conversationHistory = [], context = {} } = req.body || {};
+    const userMsg = String(message || '').trim().slice(0, 2000);
+
+    if (!userMsg) {
+      res.status(400).json({ error: 'Escribe o dicta una pregunta para el Bot Guía IA.' });
+      return;
+    }
+
+    const activeModule = String(context.activeModule || 'videobook');
+    const hasCreatedBook = Boolean(context.hasCreatedVideoBook);
+    const accessTier = String(context.accessTier || 'free');
+    const tokenBalance = Number(context.userTokenBalance || 0);
+
+    const systemInstruction = `Eres el **Bot Chat Guía Oficial** de Kinetix Estudio IA.
+Tu objetivo es guiar al usuario en tiempo real con instrucciones claras, cortas y accionables en español sobre las funciones REALES disponibles en pantalla:
+
+FUNCIONES REALES ACTUALES DEL ESTUDIO:
+1. **Audiolibro IA desde PDF** (Módulo principal):
+   - Paso 1: Sube archivos (.PDF, .DOCX, .TXT, .MD, .RTF, .HTML o imágenes con OCR) usando "Subir Archivo(s)", el botón superior "CARGAR", o arrastrando y soltando. También hay 12 plantillas listas.
+   - Paso 2: Selecciona un narrador (30 voces IA), pulsa **"Probar Voz"** para escuchar audio real 24kHz al instante, usa los botones ocultables **"Avatares (30)"** y **"Escenas (+1,200)"** si deseas personalizar fotos, y pulsa **"Crear Audiolibro con Voz IA"**.
+   - Reproducción: Usa **"Escuchar aquí"** o **"Reproducir video"**. En la parte inferior del reproductor hay controles instantáneos de subtítulos dinámicos (Color, Tamaño de fuente, Opacidad del fondo 0-95%, Posición y descarga .SRT).
+2. **Crear PDF Completo con IA**: Botón visible arriba en la barra superior, barra de comandos y pestaña "3. Crear PDF Completo con IA". Genera documentos completos con texto, imágenes, voz 24kHz, subtítulos, descarga PDF/TXT/MP3/MP4 y monetización.
+3. **Prueba por solo $5 DLL (Acceso Limitado con PayPal Real)**:
+   - Botón **"Prueba por solo $5 DLL"** en la barra superior.
+   - Pago real en USD dirigido a la cuenta oficial de PayPal (${PAYPAL_RECEIVER_ACCOUNT}).
+   - Acredita **Acceso Limitado por 7 días** + **62,500 Tokens** + hasta **5 proyectos completos** (Audiolibros, PDFs IA y exportaciones MP3/MP4).
+   - También existen planes de recarga ($10, $25, $50 USD) y suscripciones Pro ($9.99/mes, $19.99/mes, $149/año) en **"EMPIEZA AHORA · BOTÓN ACCESO"**.
+4. **Mi Biblioteca**: Guarda audiolibros en carpetas, reproduce creados y exporta lotes en ZIP (MP3 + MP4).
+5. **Otras herramientas**: Director PDF (Storyboard), Guion 2 Min, Locución Neuronal 24kHz, Clips MP4/MP3 (con efecto Ken Burns y subtítulos dinámicos) y Galería de +1,200 Fotos de Nichos.
+
+ESTADO ACTUAL DEL USUARIO:
+- Módulo abierto: ${activeModule}
+- ¿Ya creó un audiolibro?: ${hasCreatedBook ? 'Sí' : 'Aún no'}
+- Nivel de acceso actual: ${accessTier}
+- Tokens disponibles: ${tokenBalance.toLocaleString()}
+
+REGLAS:
+- Sé amable, directo y concreto (máximo 110 palabras).
+- Indica nombres exactos de botones entre **negritas**.
+- Siempre termina sugiriendo el siguiente paso concreto.
+- Nunca inventes funciones inexistentes ni pidas claves API al usuario.`;
+
+    try {
+      const ai = getGenAIClient();
+      const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+      if (Array.isArray(conversationHistory)) {
+        for (const item of conversationHistory.slice(-6)) {
+          if (item && item.sender === 'user' && typeof item.text === 'string' && item.text.trim()) {
+            contents.push({ role: 'user', parts: [{ text: item.text.trim().slice(0, 1000) }] });
+          } else if (
+            item &&
+            (item.sender === 'assistant' || item.sender === 'model') &&
+            typeof item.text === 'string' &&
+            item.text.trim()
+          ) {
+            contents.push({ role: 'model', parts: [{ text: item.text.trim().slice(0, 1000) }] });
+          }
+        }
+      }
+      contents.push({ role: 'user', parts: [{ text: userMsg }] });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-4-hydrogen',
+        contents,
+        config: {
+          systemInstruction,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      });
+
+      const replyText = (response.text || '').trim();
+      if (!replyText) {
+        res.status(502).json({ error: 'El asistente no devolvió respuesta. Intenta de nuevo.' });
+        return;
+      }
+
+      // Compute smart 1-click real UI actions relevant to this turn
+      const combined = `${userMsg} ${replyText}`.toLowerCase();
+      const suggestedActions: Array<{ label: string; actionType: string }> = [];
+
+      if (/pag|paypal|5\s*dll|5\.00|ingres|compr|token|suscrip|acceso|precio|plan|monetiz/.test(combined)) {
+        suggestedActions.push({ label: 'Prueba por solo $5 DLL (PayPal)', actionType: 'open-trial' });
+        suggestedActions.push({ label: 'Ver Planes y Monetización', actionType: 'paypal-monetization' });
+      }
+      if (/pdf\s*completo|crear\s*pdf|documento\s*pdf|nuevo\s*pdf/.test(combined)) {
+        suggestedActions.push({ label: 'Abrir Crear PDF Completo con IA', actionType: 'ai-pdf-creator' });
+      }
+      if (/subir|cargar|archivo|docx|word|adjuntar/.test(combined)) {
+        suggestedActions.push({ label: 'Cargar Archivo Ahora', actionType: 'upload-file' });
+      }
+      if (/voz|escuchar|audio|habl|sonido|narrad/.test(combined)) {
+        suggestedActions.push({ label: 'Probar Voz IA (24 kHz)', actionType: 'test-voice' });
+      }
+      if (/reproduc|subt[ií]tul|video|opacidad|color/.test(combined)) {
+        suggestedActions.push({ label: 'Abrir Reproductor de Video', actionType: 'open-player' });
+      }
+      if (/escena|foto|avatar|galer/.test(combined)) {
+        suggestedActions.push({ label: 'Ver Galería +1,200 Escenas', actionType: 'niche-gallery' });
+      }
+      if (suggestedActions.length === 0) {
+        suggestedActions.push({ label: 'Ir a Audiolibro IA', actionType: 'videobook' });
+        suggestedActions.push({ label: 'Prueba por solo $5 DLL', actionType: 'open-trial' });
+      }
+
+      res.json({
+        reply: replyText,
+        suggestedActions: suggestedActions.slice(0, 3),
+        modelUsed: 'gemini-4-hydrogen',
+      });
+    } catch (err: any) {
+      const msg = err?.message || 'No se pudo conectar con el Bot Guía IA.';
+      console.error('Error in /api/guide-chat:', msg);
+      res.status(500).json({
+        error: 'No se pudo obtener respuesta del Bot Guía IA en este momento. Intenta nuevamente.',
+      });
+    }
+  });
+
   // ============================================================================
   // 12. AI PDF DOCUMENT CREATOR (Crear PDF con IA)
   // Generates complete, publication-ready structured PDFs from a topic/prompt
@@ -2391,67 +2675,298 @@ ${keyFeatures}
   });
 
   // ============================================================================
-  // SECURE PAYPAL PAYMENT & TOKEN MONETIZATION GATEWAY
-  // Directs real customer payments to the administrator's PayPal account
-  // without exposing the email or account details on the client-side code.
+  // REAL PAYPAL PAYMENT, ORDER LEDGER & LIMITED ACCESS GATEWAY
+  // Directs real customer USD payments to garciasaul@hotmail.com (or env override)
   // ============================================================================
-  const PAYPAL_RECEIVER_ACCOUNT = process.env.PAYPAL_BUSINESS_ACCOUNT || process.env.PAYPAL_EMAIL || MASTER_ADMIN_EMAIL;
+  const DEFAULT_PAYPAL_RECEIVER = 'garciasaul@hotmail.com';
+  const PAYPAL_RECEIVER_ACCOUNT = (
+    process.env.PAYPAL_BUSINESS_ACCOUNT ||
+    process.env.PAYPAL_EMAIL ||
+    DEFAULT_PAYPAL_RECEIVER
+  ).trim();
+  const PAYPAL_ORDERS_FILE = path.join(os.tmpdir(), 'kinetix-paypal-orders-v2.json');
 
-  const TOKEN_PACKAGES_SERVER = [
-    { id: 'token-5', price: 5.0, tokens: 62500, label: '$5.00' },
-    { id: 'token-10', price: 10.0, tokens: 125000, label: '$10.00' },
-    { id: 'token-25', price: 25.0, tokens: 312500, label: '$25.00' },
-    { id: 'token-50', price: 50.0, tokens: 625000, label: '$50.00' },
+  interface ServerPayPalOrder {
+    orderId: string;
+    packageId: string;
+    itemName: string;
+    amountUsd: number;
+    tokens: number;
+    accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+    accessLabel: string;
+    accessDays: number;
+    maxProjects: number; // -1 = unlimited
+    receiverAccount: string;
+    status: 'pending_paypal' | 'paid';
+    paypalTxId?: string;
+    buyerEmail?: string;
+    createdAt: string;
+    paidAt?: string;
+    expiresAt?: string;
+  }
+
+  function loadPayPalOrders(): ServerPayPalOrder[] {
+    try {
+      if (fs.existsSync(PAYPAL_ORDERS_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(PAYPAL_ORDERS_FILE, 'utf8'));
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore read errors
+    }
+    return [];
+  }
+
+  function savePayPalOrders(orders: ServerPayPalOrder[]): void {
+    try {
+      fs.writeFileSync(PAYPAL_ORDERS_FILE, JSON.stringify(orders.slice(-500), null, 2), 'utf8');
+    } catch {
+      // ignore write errors
+    }
+  }
+
+  const TOKEN_PACKAGES_SERVER: Array<{
+    id: string;
+    aliasIds: string[];
+    price: number;
+    tokens: number;
+    label: string;
+    title: string;
+    accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+    accessLabel: string;
+    accessDays: number;
+    maxProjects: number;
+  }> = [
+    {
+      id: 'trial-5',
+      aliasIds: ['token-5'],
+      price: 5.0,
+      tokens: 62500,
+      label: '$5.00 USD',
+      title: 'Prueba por solo $5 DLL (Acceso Limitado)',
+      accessTier: 'limited_trial' as const,
+      accessLabel: 'Acceso Limitado (7 días · 5 Proyectos · 62,500 Tokens)',
+      accessDays: 7,
+      maxProjects: 5,
+    },
+    {
+      id: 'token-10',
+      aliasIds: [],
+      price: 10.0,
+      tokens: 125000,
+      label: '$10.00 USD',
+      title: 'Paquete Creador (125,000 Tokens)',
+      accessTier: 'starter' as const,
+      accessLabel: 'Acceso Creador (30 días · 15 Proyectos · 125,000 Tokens)',
+      accessDays: 30,
+      maxProjects: 15,
+    },
+    {
+      id: 'token-25',
+      aliasIds: [],
+      price: 25.0,
+      tokens: 312500,
+      label: '$25.00 USD',
+      title: 'Paquete Pro Studio (312,500 Tokens)',
+      accessTier: 'pro' as const,
+      accessLabel: 'Acceso Pro Ilimitado (30 días · 312,500 Tokens)',
+      accessDays: 30,
+      maxProjects: -1,
+    },
+    {
+      id: 'token-50',
+      aliasIds: [],
+      price: 50.0,
+      tokens: 625000,
+      label: '$50.00 USD',
+      title: 'Paquete VIP Comercial (625,000 Tokens)',
+      accessTier: 'vip' as const,
+      accessLabel: 'Acceso VIP Comercial (90 días · 625,000 Tokens)',
+      accessDays: 90,
+      maxProjects: -1,
+    },
+    {
+      id: 'plan-starter',
+      aliasIds: [],
+      price: 9.99,
+      tokens: 120000,
+      label: '$9.99 USD',
+      title: 'Pase Estudio Esencial Mensual',
+      accessTier: 'starter' as const,
+      accessLabel: 'Pase Esencial (30 días)',
+      accessDays: 30,
+      maxProjects: 20,
+    },
+    {
+      id: 'plan-pro',
+      aliasIds: [],
+      price: 19.99,
+      tokens: 300000,
+      label: '$19.99 USD',
+      title: 'Suscripción Pro Studio Mensual',
+      accessTier: 'pro' as const,
+      accessLabel: 'Pro Studio Ilimitado (30 días)',
+      accessDays: 30,
+      maxProjects: -1,
+    },
+    {
+      id: 'plan-annual',
+      aliasIds: [],
+      price: 149.0,
+      tokens: 2500000,
+      label: '$149.00 USD',
+      title: 'Suscripción Anual VIP Comercial',
+      accessTier: 'vip' as const,
+      accessLabel: 'VIP Anual Comercial (365 días)',
+      accessDays: 365,
+      maxProjects: -1,
+    },
   ];
+
+  function resolveServerPackage(packageId?: string, requestedAmount?: number) {
+    if (packageId) {
+      const exact = TOKEN_PACKAGES_SERVER.find(
+        (p) => p.id === packageId || p.aliasIds.includes(packageId)
+      );
+      if (exact) return exact;
+    }
+    if (typeof requestedAmount === 'number' && Number.isFinite(requestedAmount)) {
+      const byPrice = TOKEN_PACKAGES_SERVER.find(
+        (p) => Math.abs(p.price - requestedAmount) < 0.02
+      );
+      if (byPrice) return byPrice;
+    }
+    return TOKEN_PACKAGES_SERVER[0];
+  }
 
   app.get('/api/paypal/packages', (_req, res) => {
     res.json({
       success: true,
-      packages: TOKEN_PACKAGES_SERVER,
+      packages: TOKEN_PACKAGES_SERVER.slice(0, 4),
+      receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
       currency: 'USD',
+    });
+  });
+
+  app.get('/api/paypal/status', (_req, res) => {
+    const orders = loadPayPalOrders();
+    const paidOrders = orders.filter((o) => o.status === 'paid');
+    const pendingOrders = orders.filter((o) => o.status === 'pending_paypal');
+    const totalRevenueUsd = paidOrders.reduce((acc, o) => acc + (Number(o.amountUsd) || 0), 0);
+
+    res.json({
+      success: true,
+      configured: Boolean(PAYPAL_RECEIVER_ACCOUNT && PAYPAL_RECEIVER_ACCOUNT.includes('@')),
+      receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
+      currency: 'USD',
+      liveCheckoutMode:
+        process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET
+          ? 'paypal_rest_api_live'
+          : 'paypal_web_checkout_live',
+      paidOrdersCount: paidOrders.length,
+      pendingOrdersCount: pendingOrders.length,
+      totalRevenueUsd: Number(totalRevenueUsd.toFixed(2)),
+      recentPaidOrders: paidOrders.slice(-10).reverse().map((o) => ({
+        orderId: o.orderId,
+        itemName: o.itemName,
+        amountUsd: o.amountUsd,
+        accessTier: o.accessTier,
+        paypalTxId: o.paypalTxId || null,
+        paidAt: o.paidAt,
+      })),
     });
   });
 
   app.post('/api/paypal/create-order', (req, res) => {
     try {
-      const { packageId, amount, tokens, itemName } = req.body || {};
+      const { packageId, amount, itemName, returnOrigin } = req.body || {};
+      const pkg = resolveServerPackage(
+        typeof packageId === 'string' ? packageId : undefined,
+        typeof amount === 'number' ? amount : undefined
+      );
 
-      let finalAmount = typeof amount === 'number' && amount > 0 ? amount : 5.0;
-      let finalTokens = typeof tokens === 'number' && tokens > 0 ? tokens : 62500;
-      let finalItemName = itemName || `Kinetix Studio Tokens - ${finalTokens.toLocaleString()} Tokens`;
+      const finalAmount = pkg.price;
+      const finalTokens = pkg.tokens;
+      const finalItemName =
+        typeof itemName === 'string' && itemName.trim().length > 3
+          ? itemName.trim().slice(0, 120)
+          : pkg.title;
 
-      if (packageId) {
-        const found = TOKEN_PACKAGES_SERVER.find((p) => p.id === packageId);
-        if (found) {
-          finalAmount = found.price;
-          finalTokens = found.tokens;
-          finalItemName = `Kinetix Studio Tokens - ${found.tokens.toLocaleString()} Tokens`;
+      const orderId = `KTX-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      // Build safe return/cancel URLs (allow only http/https origins)
+      const fallbackBase = (process.env.APP_URL || '').trim();
+      let safeOrigin = '';
+      const candidateOrigin = typeof returnOrigin === 'string' ? returnOrigin.trim() : fallbackBase;
+      if (candidateOrigin && /^https?:\/\//i.test(candidateOrigin)) {
+        try {
+          const parsedUrl = new URL(candidateOrigin);
+          if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+            safeOrigin = parsedUrl.origin;
+          }
+        } catch {
+          safeOrigin = '';
         }
       }
 
-      const orderId = `ord-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-      // Construct official PayPal checkout URL securely on the server
       const params = new URLSearchParams({
         cmd: '_xclick',
         business: PAYPAL_RECEIVER_ACCOUNT,
         item_name: finalItemName,
-        item_number: packageId || 'TOKEN-CUSTOM',
+        item_number: pkg.id,
         amount: finalAmount.toFixed(2),
         currency_code: 'USD',
         no_shipping: '1',
         no_note: '0',
+        rm: '2',
         custom: orderId,
+        invoice: orderId,
       });
 
+      if (safeOrigin) {
+        params.set(
+          'return',
+          `${safeOrigin}/?paypal_status=paid&paypal_order=${encodeURIComponent(orderId)}`
+        );
+        params.set(
+          'cancel_return',
+          `${safeOrigin}/?paypal_status=cancelled&paypal_order=${encodeURIComponent(orderId)}`
+        );
+        params.set('notify_url', `${safeOrigin}/api/paypal/ipn`);
+      }
+
       const checkoutUrl = `https://www.paypal.com/cgi-bin/webscr?${params.toString()}`;
+
+      const newOrder: ServerPayPalOrder = {
+        orderId,
+        packageId: pkg.id,
+        itemName: finalItemName,
+        amountUsd: finalAmount,
+        tokens: finalTokens,
+        accessTier: pkg.accessTier,
+        accessLabel: pkg.accessLabel,
+        accessDays: pkg.accessDays,
+        maxProjects: pkg.maxProjects,
+        receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
+        status: 'pending_paypal',
+        createdAt: new Date().toISOString(),
+      };
+
+      const orders = loadPayPalOrders();
+      orders.push(newOrder);
+      savePayPalOrders(orders);
 
       res.json({
         success: true,
         orderId,
         checkoutUrl,
+        receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
         amount: finalAmount,
         tokens: finalTokens,
+        accessTier: pkg.accessTier,
+        accessLabel: pkg.accessLabel,
+        accessDays: pkg.accessDays,
+        maxProjects: pkg.maxProjects,
         itemName: finalItemName,
       });
     } catch (err: any) {
@@ -2461,14 +2976,96 @@ ${keyFeatures}
   });
 
   app.post('/api/paypal/verify-order', (req, res) => {
-    const { orderId, packageId } = req.body || {};
-    const pkg = TOKEN_PACKAGES_SERVER.find((p) => p.id === packageId) || TOKEN_PACKAGES_SERVER[0];
+    const { orderId, paypalTxId, buyerEmail } = req.body || {};
+    const cleanOrderId = typeof orderId === 'string' ? orderId.trim() : '';
+
+    if (!cleanOrderId) {
+      res.status(400).json({
+        verified: false,
+        error: 'Primero genera tu orden de pago en PayPal para poder verificarla.',
+      });
+      return;
+    }
+
+    const orders = loadPayPalOrders();
+    const order = orders.find((o) => o.orderId === cleanOrderId);
+    if (!order) {
+      res.status(404).json({
+        verified: false,
+        error: 'Orden de PayPal no encontrada en el servidor. Genera una nueva orden de pago.',
+      });
+      return;
+    }
+
+    const cleanTx =
+      typeof paypalTxId === 'string' ? paypalTxId.trim().slice(0, 64) : '';
+    const cleanBuyer =
+      typeof buyerEmail === 'string' ? buyerEmail.trim().slice(0, 120) : '';
+
+    const alreadyCredited = order.status === 'paid';
+    if (!alreadyCredited) {
+      const now = new Date();
+      const expiresDate = new Date(now.getTime() + order.accessDays * 24 * 60 * 60 * 1000);
+      order.status = 'paid';
+      order.paidAt = now.toISOString();
+      order.expiresAt = expiresDate.toISOString();
+      if (cleanTx) order.paypalTxId = cleanTx;
+      if (cleanBuyer) order.buyerEmail = cleanBuyer;
+      savePayPalOrders(orders);
+    }
+
     res.json({
       verified: true,
-      orderId: orderId || `ord-${Date.now()}`,
-      tokensAdded: pkg.tokens,
+      alreadyCredited,
+      orderId: order.orderId,
+      amountUsd: order.amountUsd,
+      tokensAdded: alreadyCredited ? 0 : order.tokens,
+      tokensTotalForOrder: order.tokens,
+      accessTier: order.accessTier,
+      accessLabel: order.accessLabel,
+      accessDays: order.accessDays,
+      maxProjects: order.maxProjects,
+      expiresAt: order.expiresAt,
+      receiverAccount: order.receiverAccount,
+      paypalTxId: order.paypalTxId || null,
       status: 'completed',
     });
+  });
+
+  // Real PayPal Instant Payment Notification (IPN) Receiver
+  app.post('/api/paypal/ipn', express.urlencoded({ extended: false }), (req, res) => {
+    try {
+      const body = req.body || {};
+      const orderId = String(body.custom || body.invoice || '').trim();
+      const receiverEmail = String(body.receiver_email || body.business || '').trim().toLowerCase();
+      const paymentStatus = String(body.payment_status || '').trim();
+      const txnId = String(body.txn_id || '').trim();
+      const payerEmail = String(body.payer_email || '').trim();
+      const gross = parseFloat(String(body.mc_gross || '0'));
+
+      if (
+        orderId &&
+        paymentStatus === 'Completed' &&
+        receiverEmail === PAYPAL_RECEIVER_ACCOUNT.toLowerCase()
+      ) {
+        const orders = loadPayPalOrders();
+        const order = orders.find((o) => o.orderId === orderId);
+        if (order && order.status !== 'paid' && gross >= order.amountUsd - 0.01) {
+          const now = new Date();
+          order.status = 'paid';
+          order.paidAt = now.toISOString();
+          order.expiresAt = new Date(
+            now.getTime() + order.accessDays * 24 * 60 * 60 * 1000
+          ).toISOString();
+          if (txnId) order.paypalTxId = txnId;
+          if (payerEmail) order.buyerEmail = payerEmail;
+          savePayPalOrders(orders);
+        }
+      }
+      res.status(200).send('OK');
+    } catch {
+      res.status(200).send('OK');
+    }
   });
 
   // Vite middleware for development or static serving for production
@@ -2484,10 +3081,90 @@ ${keyFeatures}
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: false,
         watch: null,
       },
       appType: 'spa',
     });
+
+    // When HMR is disabled in middlewareMode, Vite 8's default /@vite/client still
+    // attempts to open a WebSocket and throws an unhandled "WebSocket closed without opened."
+    // rejection. Serve a clean, spec-compatible ESM shim with zero WebSocket connections.
+    const viteClientNoHmrShim = `
+const sheetsMap = new Map();
+const linkSheetsMap = new Map();
+if (typeof document !== "undefined") {
+  document.querySelectorAll("style[data-vite-dev-id]").forEach((el) => {
+    sheetsMap.set(el.getAttribute("data-vite-dev-id"), el);
+  });
+  document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]').forEach((el) => {
+    linkSheetsMap.set(el.getAttribute("data-vite-dev-id"), el);
+  });
+}
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  if (linkSheetsMap.has(id) || typeof document === "undefined") return;
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.setAttribute("data-vite-dev-id", id);
+    style.textContent = content;
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement("afterend", style);
+    }
+    lastInsertedStyle = style;
+  } else if (style.textContent !== content) {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  if (typeof document === "undefined") return;
+  if (linkSheetsMap.has(id)) {
+    document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id="' + CSS.escape(id) + '"]').forEach((el) => el.remove());
+    linkSheetsMap.delete(id);
+  }
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  const data = {};
+  const noop = () => {};
+  return {
+    get data() { return data; },
+    accept: noop,
+    acceptExports: noop,
+    dispose: noop,
+    prune: noop,
+    decline: noop,
+    invalidate: noop,
+    on: noop,
+    off: noop,
+    send: noop,
+  };
+}
+export function injectQuery(url, queryToInject) {
+  if (!url || (url[0] !== "." && url[0] !== "/")) return url;
+  const pathname = url.replace(/[?#].*$/, "");
+  const { search, hash } = new URL(url, "http://vite.dev");
+  return pathname + "?" + queryToInject + (search ? "&" + search.slice(1) : "") + (hash || "");
+}
+export class ErrorOverlay {}
+`.trim();
+
+    app.get('/@vite/client', (_req, res) => {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.send(viteClientNoHmrShim);
+    });
+
     app.use(vite.middlewares);
   } else {
     app.use(express.static(distPath));

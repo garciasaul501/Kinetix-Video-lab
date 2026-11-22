@@ -178,8 +178,8 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
         <button
           type="button"
           onClick={onTestearPago}
-          className="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-900 bg-white hover:bg-amber-50 border border-amber-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          title="Probar flujo de pago real con PayPal ($5.00)"
+          className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          title="Prueba por solo $5 DLL — Acceso limitado por 7 días + 62,500 Tokens vía PayPal"
         >
           {t('testRealPayment', language)}
         </button>

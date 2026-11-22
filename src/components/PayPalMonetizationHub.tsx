@@ -57,17 +57,17 @@ interface SubscriptionPlan {
 
 const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   {
-    id: 'plan-starter',
-    name: 'Pase Estudio Esencial',
-    badge: 'Acceso Inmediato',
-    price: 9.99,
-    period: '/ mes',
-    description: 'Ideal para crear y escuchar tus audiolibros desde cualquier documento PDF.',
+    id: 'trial-5',
+    name: 'Prueba por solo $5 DLL',
+    badge: 'Acceso Limitado',
+    price: 5.0,
+    period: '/ 7 días',
+    description: 'Prueba real de estudio con acceso limitado por 7 días, 62,500 tokens y hasta 5 proyectos.',
     features: [
-      'Creación de audiolibros completos desde PDF',
-      'Voces naturales con IA en español e inglés',
-      'Descarga directa en formato de audio .MP3',
-      'Biblioteca personal en tu Folder de proyectos',
+      'Acceso Limitado inmediato por 7 días completos',
+      '62,500 Tokens acreditados directo a tu cuenta',
+      'Hasta 5 Audiolibros IA o PDFs Completos con IA',
+      'Voz neuronal real 24kHz + Subtítulos dinámicos',
     ],
   },
   {
@@ -79,7 +79,7 @@ const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
     description: 'Experiencia completa con los 30 avatares reales, escenas 4K y exportación en video MP4.',
     features: [
       'Audiolibros y Video-Libros ilimitados (.MP3 y .MP4)',
-      'Acceso total a los 30 Avatares Reales IA (Gemini 3.1)',
+      'Acceso total a los 30 Avatares Reales IA',
       '1,200 escenas visuales cinematográficas por nicho',
       'Exportación en alta definición 1080p sin marcas de agua',
       'Prioridad de renderizado en servidor de voz y video',
@@ -102,20 +102,39 @@ const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
   },
 ];
 
-async function fetchPayPalCheckoutUrl(planName: string, amount: number): Promise<string> {
+interface ServerCreatedPlanOrder {
+  orderId: string;
+  checkoutUrl: string;
+  receiverAccount: string;
+  amount: number;
+}
+
+async function createPayPalPlanOrder(
+  packageId: string,
+  planName: string,
+  amount: number
+): Promise<ServerCreatedPlanOrder | null> {
   try {
     const res = await fetch('/api/paypal/create-order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        packageId,
         itemName: `Kinetix Studio - ${planName}`,
         amount,
+        returnOrigin: typeof window !== 'undefined' ? window.location.origin : '',
       }),
     });
     const data = await res.json();
-    return data.checkoutUrl || 'https://www.paypal.com';
+    if (!res.ok || !data.checkoutUrl || !data.orderId) return null;
+    return {
+      orderId: data.orderId,
+      checkoutUrl: data.checkoutUrl,
+      receiverAccount: data.receiverAccount || 'garciasaul@hotmail.com',
+      amount: data.amount || amount,
+    };
   } catch {
-    return 'https://www.paypal.com';
+    return null;
   }
 }
 
@@ -142,42 +161,97 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
     }
   });
   const [checkoutStep, setCheckoutStep] = useState<'confirm' | 'processing' | 'done'>('confirm');
+  const [activeOrder, setActiveOrder] = useState<ServerCreatedPlanOrder | null>(null);
+  const [paypalTxCode, setPaypalTxCode] = useState<string>('');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<{
+    receiverAccount: string;
+    paidOrdersCount: number;
+    totalRevenueUsd: number;
+  }>({
+    receiverAccount: 'garciasaul@hotmail.com',
+    paidOrdersCount: 0,
+    totalRevenueUsd: 0,
+  });
+
+  useEffect(() => {
+    fetch('/api/paypal/status')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.receiverAccount) {
+          setLiveStatus({
+            receiverAccount: d.receiverAccount,
+            paidOrdersCount: Number(d.paidOrdersCount || 0),
+            totalRevenueUsd: Number(d.totalRevenueUsd || 0),
+          });
+        }
+      })
+      .catch(() => {});
+  }, [checkoutStep]);
 
   useEffect(() => {
     if (externalCheckoutProduct) {
-      setSelectedPlan(SUBSCRIPTION_PLANS[1]);
-      setCheckoutStep('confirm');
+      handleOpenSubscribeModal(SUBSCRIPTION_PLANS[0]);
     }
   }, [externalCheckoutProduct]);
 
-  const handleOpenSubscribeModal = (plan: SubscriptionPlan) => {
+  const handleOpenSubscribeModal = async (plan: SubscriptionPlan) => {
     setSelectedPlan(plan);
     setCheckoutStep('confirm');
+    setCheckoutError(null);
+    setPaypalTxCode('');
+    setActiveOrder(null);
+    const created = await createPayPalPlanOrder(plan.id, plan.name, plan.price);
+    if (created) {
+      setActiveOrder(created);
+    } else {
+      setCheckoutError('No se pudo generar la orden oficial de PayPal. Intenta de nuevo.');
+    }
   };
 
   const handleCloseModal = () => {
     setSelectedPlan(null);
+    setActiveOrder(null);
     if (onClearExternalCheckout) onClearExternalCheckout();
   };
 
-  const handleConfirmSubscription = async (openExternalPayPal: boolean) => {
-    if (!selectedPlan) return;
-
-    if (openExternalPayPal) {
-      const url = await fetchPayPalCheckoutUrl(selectedPlan.name, selectedPlan.price);
-      window.open(url, '_blank', 'noopener,noreferrer');
+  const handleVerifyPlanOrder = async () => {
+    if (!selectedPlan || !activeOrder) {
+      setCheckoutError('Primero genera y completa tu pago en PayPal.');
+      return;
     }
 
     setCheckoutStep('processing');
-    setTimeout(() => {
+    setCheckoutError(null);
+
+    try {
+      const res = await fetch('/api/paypal/verify-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: activeOrder.orderId,
+          paypalTxId: paypalTxCode.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.verified) {
+        throw new Error(data.error || 'No se pudo confirmar la orden en el servidor.');
+      }
+
       setCheckoutStep('done');
       setIsSubscribed(true);
       try {
         localStorage.setItem('kinetix_pro_subscribed_v1', 'true');
+        if (data.accessTier) {
+          localStorage.setItem('kinetix_access_tier_v1', String(data.accessTier));
+        }
       } catch {
         // ignore storage errors
       }
-    }, 1000);
+    } catch (err: any) {
+      setCheckoutStep('confirm');
+      setCheckoutError(err?.message || 'Error al verificar el pago.');
+    }
   };
 
   return (
@@ -185,43 +259,49 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
       {/* Ultra-Modern Minimal Hero Section */}
       <section className="relative overflow-hidden rounded-3xl bg-white border border-slate-200/90 p-8 sm:p-12 shadow-[0_20px_60px_-24px_rgba(15,23,42,0.08)]">
         <div className="max-w-3xl mx-auto text-center space-y-4">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900 text-white text-xs font-semibold tracking-wide">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>KINETIX STUDIO PRO · ACCESO TOTAL</span>
+          <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold tracking-wide">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>
+              Pagos reales PayPal activos → <strong>{liveStatus.receiverAccount}</strong>
+            </span>
+            <span className="text-slate-400">·</span>
+            <span className="font-mono text-emerald-700">
+              {liveStatus.paidOrdersCount} ventas (${liveStatus.totalRevenueUsd.toFixed(2)} USD)
+            </span>
           </div>
 
-          <h1 className="font-display text-3xl sm:text-5xl font-extrabold text-slate-950 tracking-tight leading-tight">
-            Crea audiolibros y películas habladas sin límites
+          <h1 className="font-display text-3xl sm:text-5xl font-extrabold text-amber-900 tracking-tight leading-tight">
+            Crea audiolibros, PDFs IA y videos listos para monetizar hoy
           </h1>
 
           <p className="text-sm sm:text-base text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            Desbloquea los 30 avatares reales con IA, las 1,200 escenas cinematográficas y la exportación instantánea en formatos MP3 y MP4 HD.
+            Empieza con la <strong>Prueba por solo $5 DLL</strong> (Acceso Limitado por 7 días + 62,500 Tokens) o activa el estudio completo. Todos los pagos se procesan directo a PayPal en USD.
           </p>
 
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-            <button
-              type="button"
-              onClick={() => handleOpenSubscribeModal(SUBSCRIPTION_PLANS[1])}
-              className="px-7 py-3.5 rounded-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 transition-all transform hover:scale-105 cursor-pointer border border-amber-600/30"
-            >
-              <Zap className="w-4 h-4 text-slate-950 fill-current animate-pulse" />
-              <span>EMPIEZA AHORA · BOTÓN ACCESO</span>
-            </button>
-
             {onOpenBuyTokens && (
               <button
                 type="button"
                 onClick={onOpenBuyTokens}
-                className="px-6 py-3.5 rounded-full bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-400/20 transition-all cursor-pointer"
+                className="px-7 py-3.5 rounded-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 transition-all cursor-pointer border border-amber-600/30"
               >
-                <span>⚡ Comprar Tokens (62.5k - 625k)</span>
+                <Zap className="w-4 h-4 text-slate-950 fill-current" />
+                <span>Prueba por solo $5 DLL (Acceso Limitado)</span>
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => handleOpenSubscribeModal(SUBSCRIPTION_PLANS[1])}
+              className="px-6 py-3.5 rounded-full bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-sm flex items-center gap-2 transition-all cursor-pointer"
+            >
+              <span>EMPIEZA AHORA · PLAN PRO ($19.99)</span>
+            </button>
 
             {isSubscribed && (
               <span className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                Suscripción Activa
+                Acceso Activo
               </span>
             )}
           </div>
@@ -360,30 +440,57 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
                     </div>
                   </div>
 
-                  <div className="space-y-2.5">
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmSubscription(false)}
-                      className="w-full py-3.5 px-5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition-all cursor-pointer"
-                    >
-                      <Zap className="w-4 h-4 text-amber-400" />
-                      <span>Suscríbete ahora</span>
-                    </button>
+                  {checkoutError && (
+                    <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800">
+                      {checkoutError}
+                    </div>
+                  )}
 
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmSubscription(true)}
-                      className="w-full py-3 px-5 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
-                    >
-                      <span>Continuar con</span>
-                      <PayPalLogoBadge />
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </button>
+                  <div className="space-y-2.5">
+                    {activeOrder ? (
+                      <>
+                        <a
+                          href={activeOrder.checkoutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full py-3.5 px-5 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all shadow-sm"
+                        >
+                          <span>Pagar ${activeOrder.amount.toFixed(2)} USD con</span>
+                          <PayPalLogoBadge />
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+
+                        <div className="pt-2 border-t border-slate-200 space-y-2">
+                          <div className="text-[11px] font-bold text-slate-700">
+                            Orden {activeOrder.orderId} → {activeOrder.receiverAccount}
+                          </div>
+                          <input
+                            type="text"
+                            value={paypalTxCode}
+                            onChange={(e) => setPaypalTxCode(e.target.value)}
+                            placeholder="ID de recibo PayPal (opcional)"
+                            className="w-full rounded-lg bg-slate-50 border border-slate-300 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleVerifyPlanOrder}
+                            className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>Ya pagué en PayPal · Activar Acceso</span>
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="py-4 text-center text-xs text-slate-500">
+                        Preparando enlace seguro de PayPal...
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+                  <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Cancela en cualquier momento con un clic</span>
+                    <span>Pago verificado directo a {liveStatus.receiverAccount}</span>
                   </div>
                 </>
               )}

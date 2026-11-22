@@ -206,7 +206,7 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
     return { book, imagesMap };
   };
 
-  // Attach existing .pdf, .txt, or .md files
+  // Attach existing .pdf, .docx, .txt, .md, .csv, .rtf, .html, or image files
   const handleAttachFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -223,30 +223,58 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
 
       for (const file of Array.from(files)) {
         names.push(file.name);
-        if (file.name.toLowerCase().endsWith('.pdf')) {
-          const base64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.onerror = () => reject(new Error('No se pudo leer el PDF.'));
-            reader.readAsDataURL(file);
-          });
-          const res = await fetch('/api/extract-pdf', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fileBase64: base64, filename: file.name }),
-          });
-          const data = await res.json();
-          if (res.ok && data.text) {
-            extractedBlocks.push(`[ARCHIVO: ${file.name}]\n${data.text}`);
-          } else {
-            throw new Error(data.error || `No se pudo extraer texto de ${file.name}`);
-          }
-        } else {
+        const isDirectText =
+          (file.type.startsWith('text/') && !/html/i.test(file.type)) ||
+          /\.(txt|md|markdown|csv|json)$/i.test(file.name);
+
+        if (isDirectText) {
           const txt = await file.text();
           if (txt.trim()) {
             extractedBlocks.push(`[ARCHIVO: ${file.name}]\n${txt.trim()}`);
           }
+          continue;
         }
+
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = () => reject(new Error(`No se pudo leer el archivo ${file.name}.`));
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch('/api/extract-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pdfBase64: base64,
+            fileBase64: base64,
+            filename: file.name,
+            mimeType: file.type,
+          }),
+        });
+
+        const rawResp = await res.text();
+        let data: any = {};
+        try {
+          data = rawResp ? JSON.parse(rawResp) : {};
+        } catch {
+          throw new Error(
+            res.status === 413
+              ? `El archivo ${file.name} excede el tamaño máximo permitido.`
+              : `Respuesta inválida del servidor al leer ${file.name}.`
+          );
+        }
+
+        const extracted = (data.extractedText || data.text || '').trim();
+        if (res.ok && extracted) {
+          extractedBlocks.push(`[ARCHIVO: ${file.name}]\n${extracted}`);
+        } else {
+          throw new Error(data.error || `No se pudo extraer texto de ${file.name}`);
+        }
+      }
+
+      if (extractedBlocks.length === 0) {
+        throw new Error('No se encontró texto legible en los archivos seleccionados.');
       }
 
       const combined = extractedBlocks.join('\n\n---\n\n');
@@ -601,7 +629,7 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.txt,.md"
+        accept=".pdf,.txt,.md,.csv,.docx,.doc,.rtf,.html,.json,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,image/*"
         multiple
         onChange={handleAttachFiles}
         className="hidden"

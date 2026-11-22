@@ -1,28 +1,114 @@
-import React, { useState } from 'react';
-import { X, Check, Loader2, Sparkles, ShieldCheck, ExternalLink, Zap } from 'lucide-react';
-
-import { SupportedLanguage, t } from '../utils/i18n';
+import React, { useState, useEffect } from 'react';
+import {
+  X,
+  Check,
+  Loader2,
+  ShieldCheck,
+  ExternalLink,
+  CheckCircle2,
+  Clock,
+  Lock,
+} from 'lucide-react';
+import { SupportedLanguage } from '../utils/i18n';
 
 export interface TokenPackage {
   id: string;
   price: number;
   tokens: number;
   label: string;
+  title: string;
+  accessLabel: string;
+  accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+  accessDays: number;
+  maxProjects: number;
   popular?: boolean;
 }
 
 export const TOKEN_PACKAGES: TokenPackage[] = [
-  { id: 'token-5', price: 5.0, tokens: 62500, label: '$5.00' },
-  { id: 'token-10', price: 10.0, tokens: 125000, label: '$10.00' },
-  { id: 'token-25', price: 25.0, tokens: 312500, label: '$25.00' },
-  { id: 'token-50', price: 50.0, tokens: 625000, label: '$50.00' },
+  {
+    id: 'trial-5',
+    price: 5.0,
+    tokens: 62500,
+    label: '$5.00 DLL',
+    title: 'Prueba Acceso Limitado',
+    accessLabel: '7 días · 5 proyectos · 62,500 tokens',
+    accessTier: 'limited_trial',
+    accessDays: 7,
+    maxProjects: 5,
+    popular: true,
+  },
+  {
+    id: 'token-10',
+    price: 10.0,
+    tokens: 125000,
+    label: '$10.00 DLL',
+    title: 'Paquete Creador',
+    accessLabel: '30 días · 15 proyectos · 125,000 tokens',
+    accessTier: 'starter',
+    accessDays: 30,
+    maxProjects: 15,
+  },
+  {
+    id: 'token-25',
+    price: 25.0,
+    tokens: 312500,
+    label: '$25.00 DLL',
+    title: 'Paquete Pro Studio',
+    accessLabel: '30 días · Ilimitado · 312,500 tokens',
+    accessTier: 'pro',
+    accessDays: 30,
+    maxProjects: -1,
+  },
+  {
+    id: 'token-50',
+    price: 50.0,
+    tokens: 625000,
+    label: '$50.00 DLL',
+    title: 'Paquete VIP Comercial',
+    accessLabel: '90 días · Comercial · 625,000 tokens',
+    accessTier: 'vip',
+    accessDays: 90,
+    maxProjects: -1,
+  },
 ];
+
+export interface PayPalVerifiedAccessPayload {
+  orderId: string;
+  tokensAdded: number;
+  amountPaid: number;
+  packageName: string;
+  accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+  accessLabel: string;
+  accessDays: number;
+  maxProjects: number;
+  expiresAt?: string;
+  paypalTxId?: string | null;
+}
+
+interface CreatedPayPalOrder {
+  orderId: string;
+  checkoutUrl: string;
+  receiverAccount: string;
+  amount: number;
+  tokens: number;
+  accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+  accessLabel: string;
+  accessDays: number;
+  maxProjects: number;
+  itemName: string;
+}
 
 interface BuyTokensModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentBalance: number;
-  onTokensPurchased: (tokensToAdd: number, amountPaid: number, packageName: string) => void;
+  currentAccessTier?: string;
+  onTokensPurchased: (
+    tokensToAdd: number,
+    amountPaid: number,
+    packageName: string,
+    accessDetails?: PayPalVerifiedAccessPayload
+  ) => void;
   language?: SupportedLanguage;
 }
 
@@ -30,71 +116,146 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
   isOpen,
   onClose,
   currentBalance,
+  currentAccessTier = 'free',
   onTokensPurchased,
-  language = 'en',
 }) => {
   const [selectedPackage, setSelectedPackage] = useState<TokenPackage>(TOKEN_PACKAGES[0]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [purchaseSuccess, setPurchaseSuccess] = useState<boolean>(false);
+  const [isCreatingOrder, setIsCreatingOrder] = useState<boolean>(false);
+  const [isVerifyingOrder, setIsVerifyingOrder] = useState<boolean>(false);
+  const [createdOrder, setCreatedOrder] = useState<CreatedPayPalOrder | null>(null);
+  const [paypalTxId, setPaypalTxId] = useState<string>('');
+  const [buyerEmail, setBuyerEmail] = useState<string>('');
+  const [purchaseSuccess, setPurchaseSuccess] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [receiverAccount, setReceiverAccount] = useState<string>('garciasaul@hotmail.com');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setErrorMessage(null);
+    setPurchaseSuccess(null);
+    // Fetch live verified PayPal account status from server
+    fetch('/api/paypal/status')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && data.receiverAccount) {
+          setReceiverAccount(data.receiverAccount);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handlePurchase = async () => {
-    setIsLoading(true);
+  const handleSelectPackage = (pkg: TokenPackage) => {
+    setSelectedPackage(pkg);
+    setCreatedOrder(null);
+    setErrorMessage(null);
+    setPurchaseSuccess(null);
+  };
+
+  // Step 1: Create real server-side PayPal order directed to garciasaul@hotmail.com
+  const handleCreatePayPalOrder = async () => {
+    setIsCreatingOrder(true);
     setErrorMessage(null);
 
     try {
-      // Create order securely on the server without exposing the administrator's PayPal email in frontend code
       const res = await fetch('/api/paypal/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           packageId: selectedPackage.id,
           amount: selectedPackage.price,
-          tokens: selectedPackage.tokens,
-          itemName: `Kinetix Studio Tokens - ${selectedPackage.tokens.toLocaleString()} Tokens`,
+          itemName: `Kinetix Studio - ${selectedPackage.title} (${selectedPackage.label})`,
+          returnOrigin: typeof window !== 'undefined' ? window.location.origin : '',
         }),
       });
 
       const data = await res.json();
-
-      if (data.checkoutUrl) {
-        // Open official PayPal checkout gateway in a clean window for the buyer
-        const paypalWindow = window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
-
-        // Show instant confirmation & top-up celebration
-        setPurchaseSuccess(true);
-        onTokensPurchased(selectedPackage.tokens, selectedPackage.price, selectedPackage.label);
-
-        setTimeout(() => {
-          setPurchaseSuccess(false);
-          setIsLoading(false);
-          onClose();
-        }, 2200);
-      } else {
-        throw new Error(data.error || 'No se pudo generar la pasarela de PayPal.');
+      if (!res.ok || !data.checkoutUrl || !data.orderId) {
+        throw new Error(data.error || 'No se pudo generar la orden oficial de PayPal.');
       }
-    } catch (_err) {
-      // Fallback: direct secure activation
-      setPurchaseSuccess(true);
-      onTokensPurchased(selectedPackage.tokens, selectedPackage.price, selectedPackage.label);
+
+      setCreatedOrder({
+        orderId: data.orderId,
+        checkoutUrl: data.checkoutUrl,
+        receiverAccount: data.receiverAccount || receiverAccount,
+        amount: data.amount,
+        tokens: data.tokens,
+        accessTier: data.accessTier || selectedPackage.accessTier,
+        accessLabel: data.accessLabel || selectedPackage.accessLabel,
+        accessDays: data.accessDays || selectedPackage.accessDays,
+        maxProjects: typeof data.maxProjects === 'number' ? data.maxProjects : selectedPackage.maxProjects,
+        itemName: data.itemName || selectedPackage.title,
+      });
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al generar el enlace de pago en PayPal.');
+    } finally {
+      setIsCreatingOrder(false);
+    }
+  };
+
+  // Step 2: Verify real PayPal order on server and credit Limited Access + Tokens
+  const handleVerifyAndCreditAccess = async () => {
+    if (!createdOrder) {
+      setErrorMessage('Primero genera y completa tu pago en el botón de PayPal.');
+      return;
+    }
+
+    setIsVerifyingOrder(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/paypal/verify-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: createdOrder.orderId,
+          paypalTxId: paypalTxId.trim(),
+          buyerEmail: buyerEmail.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.verified) {
+        throw new Error(data.error || 'No se pudo verificar la orden de PayPal.');
+      }
+
+      const payload: PayPalVerifiedAccessPayload = {
+        orderId: data.orderId,
+        tokensAdded: data.tokensAdded || 0,
+        amountPaid: data.amountUsd || createdOrder.amount,
+        packageName: selectedPackage.title,
+        accessTier: data.accessTier || createdOrder.accessTier,
+        accessLabel: data.accessLabel || createdOrder.accessLabel,
+        accessDays: data.accessDays || createdOrder.accessDays,
+        maxProjects: typeof data.maxProjects === 'number' ? data.maxProjects : createdOrder.maxProjects,
+        expiresAt: data.expiresAt,
+        paypalTxId: data.paypalTxId,
+      };
+
+      setPurchaseSuccess(
+        `¡${payload.accessLabel} acreditado! (+${(data.tokensTotalForOrder || createdOrder.tokens).toLocaleString()} tokens)`
+      );
+      onTokensPurchased(payload.tokensAdded, payload.amountPaid, payload.packageName, payload);
+
       setTimeout(() => {
-        setPurchaseSuccess(false);
-        setIsLoading(false);
+        setCreatedOrder(null);
+        setPaypalTxId('');
+        setBuyerEmail('');
         onClose();
-      }, 1800);
+      }, 2200);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error al confirmar la orden.');
+    } finally {
+      setIsVerifyingOrder(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
-      <div
-        className="bg-white rounded-3xl p-6 sm:p-8 max-w-[420px] w-full shadow-2xl relative text-slate-900 border border-slate-100 flex flex-col justify-between"
-        style={{ minHeight: '580px' }}
-      >
-        {/* Top Header: Close Button on Left & Centered Title */}
-        <div className="relative flex items-center justify-center w-full mb-2">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/65 backdrop-blur-xs">
+      <div className="bg-white rounded-3xl p-5 sm:p-7 max-w-[480px] w-full max-h-[92vh] overflow-y-auto shadow-2xl relative text-slate-900 border border-amber-200 space-y-5">
+        {/* Header */}
+        <div className="relative flex items-center justify-center w-full">
           <button
             type="button"
             onClick={onClose}
@@ -103,99 +264,60 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
-          <h2 className="font-bold text-lg sm:text-xl text-slate-900 text-center tracking-tight">
-            Buy tokens
-          </h2>
-        </div>
-
-        {/* Center: 3D Golden Coin Icon with Lightning Bolt */}
-        <div className="flex flex-col items-center justify-center my-3 text-center">
-          <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center">
-            {/* Outer Soft Shadow */}
-            <div className="absolute inset-2 rounded-full bg-amber-500/20 blur-xl" />
-
-            {/* Realistic 3D Golden Coin SVG identical to screenshot */}
-            <svg
-              viewBox="0 0 100 100"
-              className="w-full h-full drop-shadow-[0_8px_16px_rgba(217,119,6,0.35)]"
-            >
-              <defs>
-                <linearGradient id="coinBevel" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#FDE68A" />
-                  <stop offset="45%" stopColor="#F59E0B" />
-                  <stop offset="100%" stopColor="#B45309" />
-                </linearGradient>
-                <linearGradient id="coinFace" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#FBBF24" />
-                  <stop offset="60%" stopColor="#D97706" />
-                  <stop offset="100%" stopColor="#92400E" />
-                </linearGradient>
-                <linearGradient id="boltGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#78350F" />
-                  <stop offset="100%" stopColor="#451A03" />
-                </linearGradient>
-              </defs>
-
-              {/* Outer Golden Ring */}
-              <circle cx="50" cy="50" r="46" fill="url(#coinBevel)" />
-              {/* Inner Rim Groove */}
-              <circle cx="50" cy="50" r="42" fill="#B45309" opacity="0.6" />
-              {/* Main Golden Coin Face */}
-              <circle cx="50" cy="50" r="39" fill="url(#coinFace)" />
-              {/* Subtle Coin Highlight Ring */}
-              <circle cx="50" cy="50" r="35" fill="none" stroke="#FDE68A" strokeWidth="1.2" opacity="0.5" />
-
-              {/* Embossed Dark Bronze Lightning Bolt (Exact to Photo) */}
-              <path
-                d="M52 25 L38 51 L49 51 L46 75 L62 45 L50 45 Z"
-                fill="url(#boltGrad)"
-                stroke="#92400E"
-                strokeWidth="1.2"
-                strokeLinejoin="round"
-                filter="drop-shadow(0 2px 2px rgba(0,0,0,0.35))"
-              />
-            </svg>
+          <div className="text-center px-10">
+            <h2 className="font-extrabold text-lg sm:text-xl text-amber-900 tracking-tight">
+              Prueba por solo $5 DLL
+            </h2>
+            <p className="text-xs text-slate-500 font-medium">
+              Acredita tu Acceso Limitado inmediato con PayPal real
+            </p>
           </div>
+        </div>
 
-          <span className="text-xs sm:text-sm font-semibold text-slate-500 mt-2">
-            You'll receive
-          </span>
-          <span className="text-4xl sm:text-5xl font-black text-slate-950 tracking-tight my-0.5">
-            {selectedPackage.tokens.toLocaleString()}
-          </span>
-          <span className="text-xs sm:text-sm font-semibold text-slate-500">
-            tokens
+        {/* Verified PayPal Merchant Account Banner */}
+        <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 flex items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-semibold text-slate-700 truncate">
+              PayPal Oficial Verificado:{' '}
+              <strong className="text-amber-950">{receiverAccount}</strong>
+            </span>
+          </div>
+          <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] shrink-0">
+            USD LIVE
           </span>
         </div>
 
-        {/* 2x2 Grid Package Cards (Exact Layout from Photo) */}
-        <div className="grid grid-cols-2 gap-3 my-2">
+        {/* Package Selector 2x2 */}
+        <div className="grid grid-cols-2 gap-2.5">
           {TOKEN_PACKAGES.map((pkg) => {
             const isSelected = selectedPackage.id === pkg.id;
             return (
               <button
                 key={pkg.id}
                 type="button"
-                onClick={() => setSelectedPackage(pkg)}
-                className={`p-3.5 sm:p-4 rounded-2xl text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                onClick={() => handleSelectPackage(pkg)}
+                className={`p-3.5 rounded-2xl text-left transition-all cursor-pointer relative flex flex-col justify-between ${
                   isSelected
-                    ? 'border-2 border-blue-600 bg-white ring-2 ring-blue-500/10 shadow-sm'
-                    : 'border border-slate-200 bg-[#F8FAFC] hover:bg-white hover:border-slate-300'
+                    ? 'border-2 border-amber-500 bg-amber-50/40 ring-2 ring-amber-400/20'
+                    : 'border border-slate-200 bg-slate-50/70 hover:bg-white hover:border-slate-300'
                 }`}
               >
-                {/* Blue checkmark icon when selected (Top-Right) */}
                 {isSelected && (
-                  <span className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <span className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center">
                     <Check className="w-3.5 h-3.5 stroke-[3]" />
                   </span>
                 )}
 
                 <div>
-                  <div className="text-base sm:text-lg font-black text-slate-950">
+                  <div className="text-[11px] font-bold text-amber-800 pr-5">
+                    {pkg.title}
+                  </div>
+                  <div className="text-lg font-black text-slate-950 mt-0.5">
                     {pkg.label}
                   </div>
-                  <div className="text-xs font-semibold text-slate-500 mt-0.5">
-                    {pkg.tokens.toLocaleString()} tokens
+                  <div className="text-[11px] font-semibold text-slate-600 mt-1 leading-snug">
+                    {pkg.accessLabel}
                   </div>
                 </div>
               </button>
@@ -203,43 +325,135 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
           })}
         </div>
 
-        {/* Bottom CTA Button: Solid Black Button with Dynamic Amount */}
-        <div className="space-y-2 mt-3 pt-1">
-          {purchaseSuccess ? (
-            <div className="w-full py-4 rounded-2xl bg-emerald-600 text-white font-black text-base flex items-center justify-center gap-2 shadow-lg animate-in zoom-in-95">
-              <Check className="w-5 h-5 stroke-[3]" />
-              <span>¡+{selectedPackage.tokens.toLocaleString()} Tokens Acreditados!</span>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handlePurchase}
-              disabled={isLoading}
-              className="w-full py-4 rounded-2xl bg-black hover:bg-slate-900 active:scale-[0.99] text-white font-bold text-base transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin text-white" />
-                  <span>Conectando con PayPal seguro...</span>
-                </>
-              ) : (
-                <span>Purchase for {selectedPackage.label}</span>
-              )}
-            </button>
-          )}
-
-          {/* Privacy & Direct PayPal Security Assurance */}
-          <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500 text-center pt-1 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-            <span>
-              Pagos reales dirigidos a tu PayPal protegido sin exponer tu cuenta
+        {/* Selected Plan Benefits Summary */}
+        <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
+          <div className="flex items-center justify-between font-bold text-slate-900">
+            <span>{selectedPackage.title}</span>
+            <span className="font-mono text-amber-800">{selectedPackage.label}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600">
+            <span className="inline-flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-amber-700" />
+              {selectedPackage.accessDays} días de acceso
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              {selectedPackage.maxProjects > 0
+                ? `Hasta ${selectedPackage.maxProjects} proyectos`
+                : 'Proyectos ilimitados'}
+            </span>
+            <span className="inline-flex items-center gap-1 font-mono">
+              +{selectedPackage.tokens.toLocaleString()} tokens
             </span>
           </div>
+        </div>
 
-          {/* User current balance info */}
-          <div className="text-center text-[11px] font-mono text-slate-400">
-            Saldo actual disponible: {currentBalance.toLocaleString()} tokens
+        {errorMessage && (
+          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-800">
+            {errorMessage}
           </div>
+        )}
+
+        {purchaseSuccess ? (
+          <div className="p-4 rounded-2xl bg-emerald-600 text-white font-extrabold text-sm flex items-center justify-center gap-2 text-center shadow-lg">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+            <span>{purchaseSuccess}</span>
+          </div>
+        ) : !createdOrder ? (
+          <button
+            type="button"
+            onClick={handleCreatePayPalOrder}
+            disabled={isCreatingOrder}
+            className="w-full py-3.5 px-5 rounded-2xl bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+          >
+            {isCreatingOrder ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                <span>Generando orden real en PayPal...</span>
+              </>
+            ) : (
+              <>
+                <Lock className="w-4 h-4 text-amber-400" />
+                <span>Continuar a PayPal — {selectedPackage.label}</span>
+              </>
+            )}
+          </button>
+        ) : (
+          <div className="space-y-3 p-4 rounded-2xl bg-amber-50/50 border-2 border-amber-300">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-extrabold text-amber-950">Paso 1 · Pagar en PayPal.com</span>
+              <span className="font-mono text-[11px] text-slate-600">
+                Orden: {createdOrder.orderId}
+              </span>
+            </div>
+
+            {/* Direct official PayPal link (never popup-blocked in iframes) */}
+            <a
+              href={createdOrder.checkoutUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full py-3.5 px-4 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-black text-sm flex items-center justify-center gap-2 transition-colors shadow-sm"
+            >
+              <span>Pagar ${createdOrder.amount.toFixed(2)} USD en PayPal Ahora</span>
+              <ExternalLink className="w-4 h-4" />
+            </a>
+
+            <div className="pt-2 border-t border-amber-200/80 space-y-2">
+              <div className="text-xs font-extrabold text-slate-800">
+                Paso 2 · Activar tu Acceso Limitado al regresar de PayPal
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  value={paypalTxId}
+                  onChange={(e) => setPaypalTxId(e.target.value)}
+                  placeholder="ID de recibo PayPal (opcional)"
+                  className="rounded-lg bg-white border border-slate-300 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+                <input
+                  type="email"
+                  value={buyerEmail}
+                  onChange={(e) => setBuyerEmail(e.target.value)}
+                  placeholder="Tu correo de comprador (opcional)"
+                  className="rounded-lg bg-white border border-slate-300 px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleVerifyAndCreditAccess}
+                disabled={isVerifyingOrder}
+                className="w-full py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {isVerifyingOrder ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Verificando orden en servidor...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Confirmar Pago y Acreditar Acceso Limitado</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Footer Balance & Access Status */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] font-mono text-slate-500 border-t border-slate-100">
+          <span>Saldo: {currentBalance.toLocaleString()} tokens</span>
+          <span>
+            Estado:{' '}
+            <strong className="text-amber-800 uppercase">
+              {currentAccessTier === 'limited_trial'
+                ? 'Acceso Limitado ($5 DLL)'
+                : currentAccessTier === 'free'
+                  ? 'Sin activar'
+                  : currentAccessTier}
+            </strong>
+          </span>
         </div>
       </div>
     </div>

@@ -129,7 +129,8 @@ import {
 } from './components/FuturisticGoldLogo';
 import { SupportConciergeModal } from './components/SupportConciergeModal';
 import { ProposalSeoEditor } from './components/ProposalSeoEditor';
-import { BuyTokensModal } from './components/BuyTokensModal';
+import { BuyTokensModal, PayPalVerifiedAccessPayload } from './components/BuyTokensModal';
+import { GuideChatBot, GuideActionType } from './components/GuideChatBot';
 import { UnifiedActionToolbar } from './components/UnifiedActionToolbar';
 import { SocialShareModal } from './components/SocialShareModal';
 import { LanguageSelector } from './components/LanguageSelector';
@@ -742,6 +743,8 @@ export default function App() {
     SAMPLE_PDF_DOCUMENTS[0].filename
   );
   const [isExtractingPdf, setIsExtractingPdf] = useState<boolean>(false);
+  const [isDraggingPdf, setIsDraggingPdf] = useState<boolean>(false);
+  const globalPdfInputRef = useRef<HTMLInputElement | null>(null);
   const [tipoFormato, setTipoFormato] = useState<string>(FORMAT_PRESETS[0]);
   const [duracionObjetivo, setDuracionObjetivo] = useState<string>(DURATION_PRESETS[0]);
   const [tonoEstilo, setTonoEstilo] = useState<string>(PROPOSAL_TONE_PRESETS[0]);
@@ -1166,24 +1169,39 @@ ${textoPdf || '{{texto_pdf}}'}
     setTimeout(() => setCopiedPromptId(null), 1800);
   };
 
-  // --- PDF UPLOAD & PROPOSAL HANDLERS (Supports 1 or Multiple PDF files) ---
-  const handlePdfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  // --- PDF & DOCUMENT UPLOAD HANDLER (Supports PDF, DOCX, TXT, MD, CSV, RTF, HTML, Images OCR) ---
+  const processUploadedDocumentFiles = async (files: File[]) => {
     if (files.length === 0) return;
 
-    setUploadedPdfName(
-      files.length === 1 ? files[0].name : `${files.length} archivos PDF combinados`
-    );
+    const labelName =
+      files.length === 1 ? files[0].name : `${files.length} archivos combinados`;
+    setUploadedPdfName(labelName);
     setProposalError(null);
+    setVideoBookError(null);
     setIsExtractingPdf(true);
+
+    const toastId = toast.loading(
+      `Cargando ${labelName}...`,
+      'Extrayendo el texto completo del archivo para tu proyecto.'
+    );
 
     try {
       const extractedParts: string[] = [];
 
       for (const file of files) {
-        if (file.type.startsWith('text/') || /\.(txt|md|csv)$/i.test(file.name)) {
+        const isDirectText =
+          (file.type.startsWith('text/') && !/html/i.test(file.type)) ||
+          /\.(txt|md|markdown|csv|json)$/i.test(file.name);
+
+        if (isDirectText) {
           const textContent = await file.text();
-          extractedParts.push(`--- DOCUMENTO: ${file.name} ---\n${textContent}`);
+          if (textContent.trim()) {
+            extractedParts.push(
+              files.length > 1
+                ? `--- DOCUMENTO: ${file.name} ---\n${textContent.trim()}`
+                : textContent.trim()
+            );
+          }
           continue;
         }
 
@@ -1191,7 +1209,7 @@ ${textoPdf || '{{texto_pdf}}'}
           const reader = new FileReader();
           reader.onload = () =>
             resolve(typeof reader.result === 'string' ? reader.result : '');
-          reader.onerror = () => reject(new Error(`No se pudo leer ${file.name}`));
+          reader.onerror = () => reject(new Error(`No se pudo leer el archivo ${file.name}`));
           reader.readAsDataURL(file);
         });
 
@@ -1200,31 +1218,65 @@ ${textoPdf || '{{texto_pdf}}'}
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             pdfBase64: base64Data,
+            fileBase64: base64Data,
             filename: file.name,
+            mimeType: file.type,
           }),
         });
-        const data = await res.json();
+
+        const rawResp = await res.text();
+        let data: any = {};
+        try {
+          data = rawResp ? JSON.parse(rawResp) : {};
+        } catch {
+          throw new Error(
+            res.status === 413
+              ? `El archivo "${file.name}" supera el límite de tamaño (70 MB).`
+              : `No se pudo leer la respuesta del servidor para "${file.name}".`
+          );
+        }
+
         if (!res.ok) {
           throw new Error(data.error || `Error al extraer texto de ${file.name}.`);
         }
-        if (data.extractedText) {
+
+        const extracted = (data.extractedText || data.text || '').trim();
+        if (extracted) {
           extractedParts.push(
             files.length > 1
-              ? `--- DOCUMENTO PDF: ${file.name} ---\n${data.extractedText}`
-              : data.extractedText
+              ? `--- DOCUMENTO: ${file.name} ---\n${extracted}`
+              : extracted
           );
         }
       }
 
       if (extractedParts.length > 0) {
-        setTextoPdf(extractedParts.join('\n\n'));
+        const finalCombined = extractedParts.join('\n\n');
+        setTextoPdf(finalCombined);
+        toast.dismiss(toastId);
+        toast.success(
+          '¡Archivo cargado correctamente!',
+          `${labelName} listo (${finalCombined.split(/\s+/).filter(Boolean).length} palabras extraídas).`
+        );
+      } else {
+        throw new Error('El archivo no contenía texto legible.');
       }
     } catch (err: any) {
-      setProposalError(err?.message || 'Error al extraer el contenido del PDF.');
+      toast.dismiss(toastId);
+      const errMsg = err?.message || 'Error al extraer el contenido del archivo.';
+      setProposalError(errMsg);
+      setVideoBookError(errMsg);
+      toast.error('Error al cargar archivo', errMsg);
     } finally {
       setIsExtractingPdf(false);
-      e.target.value = '';
     }
+  };
+
+  const handlePdfFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (files.length === 0) return;
+    await processUploadedDocumentFiles(files);
   };
 
   const handleGeneratePdfProposal = async (e?: React.FormEvent) => {
@@ -2515,6 +2567,20 @@ ${textoPdf || '{{texto_pdf}}'}
       return 62500;
     }
   });
+  const [userAccessTier, setUserAccessTier] = useState<string>(() => {
+    try {
+      return localStorage.getItem('kinetix_access_tier_v1') || 'free';
+    } catch {
+      return 'free';
+    }
+  });
+  const [userAccessLabel, setUserAccessLabel] = useState<string>(() => {
+    try {
+      return localStorage.getItem('kinetix_access_label_v1') || '';
+    } catch {
+      return '';
+    }
+  });
 
   const [currentLanguage, setCurrentLanguage] = useState<SupportedLanguage>(() => {
     return getSavedLanguage();
@@ -2540,17 +2606,12 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   const handleToolbarCargar = () => {
+    // Disparar el selector de archivos SINCRÓNICAMENTE dentro del clic para que ningún navegador ni iframe lo bloquee
+    if (globalPdfInputRef.current) {
+      globalPdfInputRef.current.click();
+    }
     setActiveModule('videobook');
     setVideobookViewMode('creator');
-    setTimeout(() => {
-      const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
-      if (fileInput) {
-        fileInput.click();
-      } else {
-        const stage = document.getElementById('audiobook-creation-stage');
-        if (stage) stage.scrollIntoView({ behavior: 'smooth' });
-      }
-    }, 80);
   };
 
   const handleToolbarEliminar = () => {
@@ -2572,20 +2633,112 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
-  const handleTokensPurchased = (tokensToAdd: number, amountPaid: number, packageName: string) => {
-    setUserTokenBalance((prev) => {
-      const next = prev + tokensToAdd;
-      try {
-        localStorage.setItem('kinetix_user_tokens', String(next));
-      } catch {
-        // ignore storage errors
-      }
-      return next;
-    });
+  const handleTokensPurchased = (
+    tokensToAdd: number,
+    amountPaid: number,
+    packageName: string,
+    accessDetails?: PayPalVerifiedAccessPayload
+  ) => {
+    if (tokensToAdd > 0) {
+      setUserTokenBalance((prev) => {
+        const next = prev + tokensToAdd;
+        try {
+          localStorage.setItem('kinetix_user_tokens', String(next));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    }
+
+    const grantedTier =
+      accessDetails?.accessTier || (amountPaid <= 5.5 ? 'limited_trial' : 'pro');
+    const grantedLabel =
+      accessDetails?.accessLabel ||
+      (grantedTier === 'limited_trial'
+        ? 'Acceso Limitado (7 días · 5 Proyectos · 62,500 Tokens)'
+        : `${packageName} Activo`);
+
+    setUserAccessTier(grantedTier);
+    setUserAccessLabel(grantedLabel);
+    try {
+      localStorage.setItem('kinetix_access_tier_v1', grantedTier);
+      localStorage.setItem('kinetix_access_label_v1', grantedLabel);
+    } catch {
+      // ignore storage errors
+    }
+
     toast.success(
-      '¡Compra de Tokens Exitosa!',
-      `Se han acreditado +${tokensToAdd.toLocaleString()} tokens a tu cuenta mediante PayPal ($${amountPaid.toFixed(2)}).`
+      grantedTier === 'limited_trial'
+        ? '¡Acceso Limitado ($5 DLL) Acreditado!'
+        : '¡Pago PayPal Verificado y Acreditado!',
+      `${grantedLabel} · Pago recibido ($${amountPaid.toFixed(2)} USD).`
     );
+  };
+
+  // Auto-verify PayPal checkout return URL (?paypal_status=paid&paypal_order=KTX-...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const ppStatus = params.get('paypal_status');
+    const ppOrder = params.get('paypal_order');
+    if (ppStatus === 'paid' && ppOrder) {
+      fetch('/api/paypal/verify-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: ppOrder }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.verified) {
+            handleTokensPurchased(
+              data.tokensAdded || 0,
+              data.amountUsd || 5.0,
+              data.accessLabel || 'Prueba por solo $5 DLL',
+              {
+                orderId: data.orderId,
+                tokensAdded: data.tokensAdded || 0,
+                amountPaid: data.amountUsd || 5.0,
+                packageName: data.accessLabel || 'Prueba por solo $5 DLL',
+                accessTier: data.accessTier || 'limited_trial',
+                accessLabel: data.accessLabel || 'Acceso Limitado (7 días)',
+                accessDays: data.accessDays || 7,
+                maxProjects: typeof data.maxProjects === 'number' ? data.maxProjects : 5,
+                expiresAt: data.expiresAt,
+                paypalTxId: data.paypalTxId,
+              }
+            );
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          const cleanUrl = window.location.pathname + window.location.hash;
+          window.history.replaceState({}, document.title, cleanUrl);
+        });
+    } else if (ppStatus === 'cancelled') {
+      toast.info('Pago en PayPal cancelado', 'Puedes activar tu Prueba por solo $5 DLL cuando gustes.');
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, []);
+
+  const handleGuideBotAction = (action: GuideActionType) => {
+    if (action === 'open-trial') {
+      setIsBuyTokensModalOpen(true);
+    } else if (action === 'upload-file') {
+      handleToolbarCargar();
+    } else if (action === 'open-player') {
+      openPlayerModal();
+    } else if (action === 'test-voice') {
+      handleTestSelectedVoice();
+    } else if (
+      action === 'videobook' ||
+      action === 'ai-pdf-creator' ||
+      action === 'niche-gallery' ||
+      action === 'paypal-monetization'
+    ) {
+      setActiveModule(action);
+    }
   };
 
   const [isGoldModel, setIsGoldModel] = useState<boolean>(() => {
@@ -2786,11 +2939,20 @@ ${textoPdf || '{{texto_pdf}}'}
           <div className="px-3 py-2.5 rounded-xl bg-white border border-amber-200/80 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[11px] font-medium text-slate-500">
-                {t('tokensBadge', currentLanguage)}
+                {userAccessTier === 'limited_trial'
+                  ? 'Acceso Limitado ($5 DLL)'
+                  : userAccessTier !== 'free'
+                    ? `Plan ${userAccessTier.toUpperCase()}`
+                    : t('tokensBadge', currentLanguage)}
               </div>
               <div className="text-sm font-mono tabular-nums font-extrabold text-amber-800">
                 {userTokenBalance.toLocaleString()}
               </div>
+              {userAccessLabel && (
+                <div className="text-[10px] text-emerald-700 font-semibold truncate">
+                  {userAccessLabel}
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -2798,9 +2960,9 @@ ${textoPdf || '{{texto_pdf}}'}
                 setIsBuyTokensModalOpen(true);
                 setMobileSidebarOpen(false);
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-amber-300 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              + {t('buyTokens', currentLanguage)}
+              $5 DLL
             </button>
           </div>
 
@@ -2969,6 +3131,16 @@ ${textoPdf || '{{texto_pdf}}'}
             </div>
           </div>
         </header>
+
+        {/* Persistent Hidden Global File Input so "Cargar" toolbar button ALWAYS works synchronously */}
+        <input
+          ref={globalPdfInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.txt,.md,.csv,.docx,.doc,.rtf,.html,.json,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,image/*"
+          onChange={handlePdfFileUpload}
+          className="hidden"
+        />
 
         {/* Hidden Background Audio Element for Neural Voice Takes */}
         <audio
@@ -3257,8 +3429,33 @@ ${textoPdf || '{{texto_pdf}}'}
                         </span>
                       </div>
 
-                      {/* PDF Upload Bar */}
-                      <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50/70 border border-slate-200">
+                      {/* PDF / Document Upload Bar with Drag & Drop */}
+                      <div
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setIsDraggingPdf(true);
+                        }}
+                        onDragLeave={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setIsDraggingPdf(false);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setIsDraggingPdf(false);
+                          const droppedFiles = Array.from(e.dataTransfer.files || []);
+                          if (droppedFiles.length > 0) {
+                            processUploadedDocumentFiles(droppedFiles);
+                          }
+                        }}
+                        className={`flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 p-4 rounded-xl border-2 border-dashed transition-colors ${
+                          isDraggingPdf
+                            ? 'bg-amber-50 border-amber-500'
+                            : 'bg-slate-50/70 border-slate-200 hover:border-amber-300'
+                        }`}
+                      >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-10 h-10 rounded-lg bg-white border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
                             <FileText className="w-5 h-5" />
@@ -3266,11 +3463,13 @@ ${textoPdf || '{{texto_pdf}}'}
                           <div className="min-w-0">
                             <div className="text-sm font-bold text-slate-950 truncate">
                               {isExtractingPdf
-                                ? 'Extrayendo texto del PDF...'
-                                : uploadedPdfName || 'Selecciona uno o varios archivos PDF'}
+                                ? 'Extrayendo texto del archivo...'
+                                : isDraggingPdf
+                                  ? 'Suelta tus archivos aquí para cargarlos'
+                                  : uploadedPdfName || 'Arrastra o selecciona tus archivos'}
                             </div>
                             <div className="text-xs text-slate-500">
-                              Compatible con .PDF, .TXT y .MD sin límite de extensión
+                              Compatible con .PDF, .DOCX, .TXT, .MD, .RTF, .HTML e imágenes (OCR)
                             </div>
                           </div>
                         </div>
@@ -3281,11 +3480,11 @@ ${textoPdf || '{{texto_pdf}}'}
                           ) : (
                             <FileUp className="w-4 h-4" />
                           )}
-                          <span>Subir PDF(s)</span>
+                          <span>{isExtractingPdf ? 'Cargando...' : 'Subir Archivo(s)'}</span>
                           <input
                             type="file"
                             multiple
-                            accept=".pdf,.txt,.md,application/pdf,text/plain"
+                            accept=".pdf,.txt,.md,.csv,.docx,.doc,.rtf,.html,.json,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,image/*"
                             onChange={handlePdfFileUpload}
                             className="hidden"
                           />
@@ -4049,10 +4248,11 @@ ${textoPdf || '{{texto_pdf}}'}
                       ) : (
                         <FileUp className="w-3.5 h-3.5" />
                       )}
-                      Subir PDF / TXT
+                      Subir Archivo(s)
                       <input
                         type="file"
-                        accept=".pdf,.txt,.md,application/pdf,text/plain"
+                        multiple
+                        accept=".pdf,.txt,.md,.csv,.docx,.doc,.rtf,.html,.json,.png,.jpg,.jpeg,.webp,application/pdf,text/plain,image/*"
                         onChange={handlePdfFileUpload}
                         className="hidden"
                       />
@@ -6996,16 +7196,27 @@ ${textoPdf || '{{texto_pdf}}'}
         onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
       />
 
-      {/* Buy Tokens Modal (Exact match to User Screenshot with 3D Gold Coin & Real PayPal Checkout) */}
+      {/* Real PayPal $5 DLL Limited Access & Token Checkout Modal */}
       <BuyTokensModal
         isOpen={isBuyTokensModalOpen}
         onClose={() => setIsBuyTokensModalOpen(false)}
         currentBalance={userTokenBalance}
+        currentAccessTier={userAccessTier}
         onTokensPurchased={handleTokensPurchased}
         language={currentLanguage}
       />
 
-      {/* Social Share & Viral Traffic + Real PayPal Test Modal */}
+      {/* Always-Visible Floating Bot Chat Guía IA */}
+      <GuideChatBot
+        activeModule={activeModule}
+        hasCreatedVideoBook={hasCreatedVideoBook}
+        hasLoadedText={textoPdf.trim().length > 20}
+        accessTier={userAccessTier}
+        userTokenBalance={userTokenBalance}
+        onExecuteAction={handleGuideBotAction}
+      />
+
+      {/* Social Share & Viral Traffic + Real PayPal $5 DLL Modal */}
       <SocialShareModal
         isOpen={isSocialShareModalOpen}
         onClose={() => setIsSocialShareModalOpen(false)}

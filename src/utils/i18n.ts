@@ -74,8 +74,8 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'EMPIEZA AHORA ANTES DE USAR O VER · BOTÓN ACCESO',
     monetizationSub: 'Acceso inmediato a la creación de audiolibros, dirección de secuencias y exportación de video',
-    testRealPayment: '⚡ Testear Pago Real ($5.00)',
-    secureSslNotice: '100% Protegido con Proxy Seguro SSL',
+    testRealPayment: 'Prueba por solo $5 DLL',
+    secureSslNotice: '100% Protegido con PayPal Oficial',
     tokensBalance: 'Tokens Disponibles',
 
     // Social Share Modal
@@ -88,9 +88,9 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     viralScriptTitle: 'Guion Viral para TikTok / Instagram Reels / YouTube Shorts:',
     copyScriptBtn: 'Copiar Guion Viral',
     scriptCopied: '¡Guion Copiado!',
-    testPaymentBoxTitle: '⚡ Testear Pagos Reales con PayPal',
-    testPaymentBoxDesc: 'Haz un cobro real de prueba por $5.00 (62,500 Tokens) depositado directo en tu cuenta PayPal.',
-    openCheckoutBtn: 'Abrir Checkout de Prueba ($5.00)',
+    testPaymentBoxTitle: 'Prueba por solo $5 DLL · Acceso Limitado',
+    testPaymentBoxDesc: 'Activa acceso limitado por 7 días + 62,500 Tokens con pago real directo a PayPal.',
+    openCheckoutBtn: 'Prueba por solo $5 DLL',
     modalClose: 'Cerrar',
 
     // Buy Tokens Modal
@@ -158,7 +158,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'START NOW BEFORE USING OR VIEWING · ACCESS BUTTON',
     monetizationSub: 'Instant full access to AI audiobook creation, visual sequence directing & MP4 video export',
-    testRealPayment: '⚡ Test Real Payment ($5.00)',
+    testRealPayment: 'Try for only $5 USD',
     secureSslNotice: '100% Protected with Secure SSL Proxy',
     tokensBalance: 'Available Tokens',
 
@@ -242,7 +242,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'COMECE AGORA ANTES DE USAR OU VER · BOTÃO ACESSO',
     monetizationSub: 'Acesso imediato à criação de audiolivros, direção de sequências e exportação MP4',
-    testRealPayment: '⚡ Testar Pagamento Real ($5.00)',
+    testRealPayment: 'Teste por apenas $5 USD',
     secureSslNotice: '100% Protegido com Proxy SSL Seguro',
     tokensBalance: 'Tokens Disponíveis',
 
@@ -326,7 +326,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'COMMENCEZ MAINTENANT AVANT D’UTILISER OU DE VOIR · BOUTON ACCÈS',
     monetizationSub: 'Accès immédiat à la création de livres audio, séquences et export vidéo MP4',
-    testRealPayment: '⚡ Tester Paiement Réel ($5.00)',
+    testRealPayment: 'Essai pour seulement 5 $',
     secureSslNotice: '100% Protégé par Proxy Sécurisé SSL',
     tokensBalance: 'Tokens Disponibles',
 
@@ -410,7 +410,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'JETZT STARTEN VOR DER NUTZUNG ODER ANSICHT · ZUGANGS-BUTTON',
     monetizationSub: 'Sofortiger voller Zugriff auf Hörbuch-Erstellung, Sequenz-Regie und MP4-Export',
-    testRealPayment: '⚡ Echte Zahlung Testen ($5.00)',
+    testRealPayment: 'Test für nur 5 $ USD',
     secureSslNotice: '100% Geschützt mit sicherem SSL-Proxy',
     tokensBalance: 'Verfügbare Tokens',
 
@@ -494,7 +494,7 @@ export const TRANSLATIONS: Record<SupportedLanguage, Record<string, string>> = {
     // Monetization / Access Bar
     monetizationTitle: 'INIZIA ORA PRIMA DI USARE O VEDERE · PULSANTE ACCESSO',
     monetizationSub: 'Accesso immediato alla creazione di audiolibri, regia di sequenze ed esportazione MP4',
-    testRealPayment: '⚡ Testa Pagamento Reale ($5.00)',
+    testRealPayment: 'Prova per soli $5 USD',
     secureSslNotice: '100% Protetto con Proxy Sicuro SSL',
     tokensBalance: 'Token Disponibili',
 

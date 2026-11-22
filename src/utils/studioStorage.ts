@@ -662,6 +662,18 @@ export function saveAudiobooksMetaToStorage(items: SavedAudiobookItem[]): void {
   try {
     window.localStorage.setItem(AUDIOBOOK_FOLDER_META_KEY, JSON.stringify(items));
   } catch (_e) {
-    // Ignore storage quota warnings
+    try {
+      const compactItems = items.map((item, idx) =>
+        idx === 0 ? item : { ...item, audioBase64: null }
+      );
+      window.localStorage.setItem(AUDIOBOOK_FOLDER_META_KEY, JSON.stringify(compactItems));
+    } catch (_e2) {
+      try {
+        const metaOnly = items.map((item) => ({ ...item, audioBase64: null }));
+        window.localStorage.setItem(AUDIOBOOK_FOLDER_META_KEY, JSON.stringify(metaOnly));
+      } catch (_e3) {
+        // Ignore storage quota warnings
+      }
+    }
   }
 }

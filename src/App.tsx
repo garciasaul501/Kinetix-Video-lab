@@ -45,14 +45,18 @@ import {
   Share2,
   ChevronDown,
   ChevronUp,
+  FilePlus2,
 } from 'lucide-react';
-import { pcmBase64ToWav, createSyntheticToneWav } from './utils/audioWav';
+import { pcmBase64ToWav } from './utils/audioWav';
 import {
   renderSequenceToVideoUrl,
   downloadAudioAsMp3,
   renderVideoBookToMp4Url,
   VideoBook,
   AudiobookVisualMode,
+  VideoExportSettings,
+  DynamicSubtitleSettings,
+  loadSavedSubtitleSettings,
 } from './utils/videoRenderer';
 import {
   exportScriptAsPdf,
@@ -122,6 +126,7 @@ import { UnifiedActionToolbar } from './components/UnifiedActionToolbar';
 import { SocialShareModal } from './components/SocialShareModal';
 import { LanguageSelector } from './components/LanguageSelector';
 import { useToast } from './components/ToastNotification';
+import { AiPdfCreatorStudio } from './components/AiPdfCreatorStudio';
 import {
   SupportedLanguage,
   getSavedLanguage,
@@ -616,64 +621,39 @@ function loadInitialVoiceTakes(): VoiceoverTake[] {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((take: VoiceoverTake) => {
-          if (!take.wavUrl && typeof window !== 'undefined') {
-            const tone = createSyntheticToneWav(take.durationSec || 6, 240);
-            return { ...take, wavUrl: tone.wavUrl, peaks: take.peaks || tone.peaks };
+        const restored: VoiceoverTake[] = [];
+        for (const take of parsed as VoiceoverTake[]) {
+          // Skip legacy fake demo takes or synthetic tone fallbacks
+          if (
+            !take ||
+            take.id === 'take-101' ||
+            take.id === 'take-102' ||
+            take.isSyntheticFallback
+          ) {
+            continue;
           }
-          return take;
-        });
+          // Only restore takes with real audioBase64 and rebuild a fresh playable Blob URL
+          if (take.audioBase64 && take.audioBase64.length > 100) {
+            try {
+              const rebuilt = pcmBase64ToWav(take.audioBase64, 24000);
+              restored.push({
+                ...take,
+                wavUrl: rebuilt.wavUrl,
+                durationSec: rebuilt.durationSec,
+                peaks: take.peaks?.length ? take.peaks : rebuilt.peaks,
+              });
+            } catch {
+              // Skip corrupt audio take
+            }
+          }
+        }
+        return restored;
       }
     }
   } catch (_e) {
-    // fallback
+    // ignore storage errors
   }
-
-  const tone1 = typeof window !== 'undefined' ? createSyntheticToneWav(7.5, 260) : { wavUrl: '', peaks: [] };
-  const tone2 = typeof window !== 'undefined' ? createSyntheticToneWav(6.2, 210) : { wavUrl: '', peaks: [] };
-
-  const initialTakes: VoiceoverTake[] = [
-    {
-      id: 'take-101',
-      createdAt: '11:20:00',
-      scriptExcerpt: 'Bienvenido a Kinetix Estudio IA: la síntesis entre voz humana expresiva y dirección...',
-      fullScript:
-        'Bienvenido a Kinetix Estudio IA: la síntesis entre voz humana expresiva y dirección audiovisual moderna. Cada narración está diseñada con acento natural, micro-inflexiones y masterización a 24 kHz.',
-      voiceGender: 'femenina',
-      voiceName: 'Kore',
-      accent: 'español neutro latinoamericano',
-      tone: 'cinematográfico, cálido y envolvente',
-      executedPrompt: 'Voz femenina Kore, tono cálido y cinematográfico',
-      wavUrl: tone1.wavUrl,
-      durationSec: 7.5,
-      peaks: tone1.peaks,
-      isFavorite: true,
-    },
-    {
-      id: 'take-102',
-      createdAt: '10:45:12',
-      scriptExcerpt: 'En cada documento PDF habita un audiolibro completo esperando cobrar vida...',
-      fullScript:
-        'En cada documento PDF habita un audiolibro completo esperando cobrar vida. La inteligencia artificial no sustituye al narrador, sino que magnifica su alcance en tiempo récord.',
-      voiceGender: 'masculina',
-      voiceName: 'Charon',
-      accent: 'español neutro',
-      tone: 'profesional e informativo',
-      executedPrompt: 'Voz masculina Charon, documental y profundo',
-      wavUrl: tone2.wavUrl,
-      durationSec: 6.2,
-      peaks: tone2.peaks,
-      isFavorite: false,
-    },
-  ];
-
-  try {
-    window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(initialTakes));
-  } catch (_e) {
-    // ignore
-  }
-
-  return initialTakes;
+  return [];
 }
 
 export default function App() {
@@ -714,7 +694,8 @@ export default function App() {
   const [exportedBookMp4Url, setExportedBookMp4Url] = useState<string | null>(null);
 
   // --- VIDEOBOOK VIEW MODE: 'creator' (Crear desde PDF), 'library' (Mi Biblioteca) ---
-  // La pantalla de reproducción se abre únicamente dentro del botón 'Reproducir' (Modal dedicado)
+  // Solo reproducir audiolibros realmente creados o cargados desde Mi Biblioteca
+  const [hasCreatedVideoBook, setHasCreatedVideoBook] = useState<boolean>(false);
   const [videobookViewMode, setVideobookViewMode] = useState<'creator' | 'library'>('creator');
   const [isPlayerModalOpen, setIsPlayerModalOpen] = useState<boolean>(false);
   const [playerAutoPlayTrigger, setPlayerAutoPlayTrigger] = useState<number>(0);
@@ -797,10 +778,7 @@ export default function App() {
   const [voiceTakes, setVoiceTakes] = useState<VoiceoverTake[]>(() =>
     loadInitialVoiceTakes()
   );
-  const [activeTakeId, setActiveTakeId] = useState<string | null>(() => {
-    const initial = loadInitialVoiceTakes();
-    return initial[0]?.id || null;
-  });
+  const [activeTakeId, setActiveTakeId] = useState<string | null>(null);
   const [voiceFilterTab, setVoiceFilterTab] = useState<'all' | 'favorites'>('all');
 
   const handleToggleTakeFavorite = (takeId: string) => {
@@ -879,7 +857,9 @@ ${textoPdf || '{{texto_pdf}}'}
     sceneEmotionDesc || '[descripción de la escena o emoción]'
   }. Utiliza un estilo visual ${visualStyleDesc || '[estilo visual deseado]'}.`;
 
-  const activeTake = voiceTakes.find((t) => t.id === activeTakeId) || voiceTakes[0] || null;
+  const activeTake = activeTakeId
+    ? voiceTakes.find((t) => t.id === activeTakeId) || null
+    : null;
 
   const stopBackgroundPlayback = () => {
     bgPlayingRef.current = false;
@@ -950,8 +930,11 @@ ${textoPdf || '{{texto_pdf}}'}
       return;
     }
 
-    if (!videoBook.pages || videoBook.pages.length === 0) {
-      toast.info('Sin audiolibro listo', 'Primero crea o carga un PDF para reproducir.');
+    if (!hasCreatedVideoBook || !videoBook.pages || videoBook.pages.length === 0) {
+      toast.info(
+        'Crea tu audiolibro primero',
+        'Primero crea un Audiolibro desde tu PDF o carga uno desde Mi Biblioteca para reproducir.'
+      );
       return;
     }
 
@@ -964,9 +947,16 @@ ${textoPdf || '{{texto_pdf}}'}
     bgPlayingRef.current = true;
     setIsBgPlaying(true);
 
-    if (activeTake && activeTake.wavUrl && bgAudioRef.current) {
+    if (
+      activeTake &&
+      activeTake.wavUrl &&
+      !activeTake.isSyntheticFallback &&
+      bgAudioRef.current
+    ) {
+      bgAudioRef.current.muted = false;
+      bgAudioRef.current.volume = 1.0;
       bgAudioRef.current.play().catch(() => {
-        // Fallback to browser voice narration if audio element cannot play
+        // Fallback to real browser voice narration if audio element cannot play
         speakBgChapter(bgChapterIdx);
       });
     } else {
@@ -975,15 +965,18 @@ ${textoPdf || '{{texto_pdf}}'}
     }
 
     toast.success(
-      'Reproduciendo en segundo plano',
-      `"${videoBook.bookTitle || 'Audiolibro IA'}" suena sin abrir la pantalla del reproductor.`
+      'Reproduciendo tu Audiolibro',
+      `"${videoBook.bookTitle || 'Audiolibro IA'}" se está escuchando ahora.`
     );
   };
 
   // Opens the full VideoBookPlayer cleanly inside a modal triggered by the "Reproducir" button
   const openPlayerModal = () => {
-    if (!videoBook.pages || videoBook.pages.length === 0) {
-      toast.info('Sin audiolibro listo', 'Primero crea o carga un PDF para reproducir.');
+    if (!hasCreatedVideoBook || !videoBook.pages || videoBook.pages.length === 0) {
+      toast.info(
+        'Crea tu audiolibro primero',
+        'Solo se reproducen audiolibros ya creados. Genera uno desde tu PDF o abre uno en Mi Biblioteca.'
+      );
       return;
     }
     stopBackgroundPlayback();
@@ -1205,10 +1198,12 @@ ${textoPdf || '{{texto_pdf}}'}
     setIsGeneratingVideoBook(true);
     setVideoBookError(null);
     setExportedBookMp4Url(null);
+    stopBackgroundPlayback();
+    setActiveTakeId(null);
 
     const toastId = toast.loading(
-      'Generando Audiolibro IA...',
-      'Extrayendo texto del PDF, diseñando capítulos y asignando escenas visuales...'
+      'Creando Audiolibro y Voz IA...',
+      'Generando capítulos del PDF, asignando escenas y sintetizando la narración en audio real...'
     );
 
     try {
@@ -1219,17 +1214,28 @@ ${textoPdf || '{{texto_pdf}}'}
           textoPdf,
           bookStyle,
           filename: uploadedPdfName || 'Documento PDF',
+          chaptersCount: targetChaptersCount,
           targetChapters: targetChaptersCount,
           durationMode: videoDurationMode,
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data.videoBook) {
+      if (!res.ok || !data.videoBook || !Array.isArray(data.videoBook.pages) || data.videoBook.pages.length === 0) {
         throw new Error(data.error || 'No se pudo convertir el PDF en Audiolibro IA.');
       }
 
       const createdBook: VideoBook = data.videoBook;
+      const narrationText =
+        (createdBook.fullNarration && createdBook.fullNarration.trim().length > 20
+          ? createdBook.fullNarration.trim()
+          : createdBook.pages
+              .map((p) => `${p.chapterTitle}. ${p.pageText}`)
+              .join(' ')
+              .trim());
+      createdBook.fullNarration = narrationText;
+
       setVideoBook(createdBook);
+      setHasCreatedVideoBook(true);
       setActiveBookPageIdx(0);
 
       // Immediately assign matching high-resolution photos from the 1,200+ Niche Scene Library
@@ -1239,23 +1245,25 @@ ${textoPdf || '{{texto_pdf}}'}
         autoPhotoMap[Number(idxStr)] = photo.imageUrl;
       });
       setPageImages(autoPhotoMap);
+      setNarrationScript(narrationText);
 
-      if (createdBook.fullNarration) {
-        setNarrationScript(createdBook.fullNarration);
-      }
-
-      toast.dismiss(toastId);
-      toast.success(
-        '¡Audiolibro Creado con Éxito!',
-        `Se han generado ${createdBook.pages.length} capítulos sincronizados. Pulsa el botón "Reproducir" para abrir el reproductor.`
-      );
+      // Always synthesize real Gemini TTS voice for the newly created audiobook so it plays with 100% real sound
+      const narrationPromise = handleGenerateNarration(narrationText, { silentToast: true });
 
       if (autoIllustrateAndNarrate) {
         await Promise.all([
           handleGenerateAllBookIllustrations(createdBook),
-          handleGenerateNarration(createdBook.fullNarration),
+          narrationPromise,
         ]);
+      } else {
+        await narrationPromise;
       }
+
+      toast.dismiss(toastId);
+      toast.success(
+        '¡Audiolibro y Voz Listos al 100%!',
+        `Se crearon ${createdBook.pages.length} capítulos con narración de voz real. Pulsa "Reproducir" para verlo y escucharlo.`
+      );
     } catch (err: any) {
       toast.dismiss(toastId);
       const errMsg = err?.message || 'Error al crear el Audiolibro desde el PDF.';
@@ -1372,14 +1380,21 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
-  const handleExportVideoBookMp4 = async () => {
+  const handleExportVideoBookMp4 = async (
+    exportSettings?: VideoExportSettings,
+    subtitleSettings?: DynamicSubtitleSettings
+  ) => {
     if (isExportingBookMp4) return;
     setIsExportingBookMp4(true);
     setBookMp4Progress(5);
 
+    const effectiveSubtitles = subtitleSettings || loadSavedSubtitleSettings();
+
     const toastId = toast.loading(
       'Exportando Video Audiolibro (.MP4)...',
-      'Renderizando fotogramas clave, avatar hablado y pistas sincronizadas...'
+      effectiveSubtitles.enabled
+        ? 'Renderizando fotogramas clave, subtítulos dinámicos y pistas sincronizadas...'
+        : 'Renderizando fotogramas clave, avatar hablado y pistas sincronizadas...'
     );
 
     try {
@@ -1392,6 +1407,9 @@ ${textoPdf || '{{texto_pdf}}'}
           mode: audiobookVisualMode,
           avatar: selectedAvatar,
           customAvatarUrl,
+          exportSettings,
+          subtitleSettings: effectiveSubtitles,
+          narrationOverride: activeTake?.fullScript || videoBook.fullNarration,
         }
       );
       setExportedBookMp4Url(url);
@@ -1840,22 +1858,27 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
-  const handleGenerateNarration = async (overrideScript?: string) => {
+  const handleGenerateNarration = async (
+    overrideScript?: string,
+    options?: { silentToast?: boolean }
+  ) => {
     const textToSpeak = (overrideScript ?? narrationScript).trim();
     if (!textToSpeak) {
       const msg = 'Por favor ingresa o selecciona un guion para generar la narración.';
       setNarrationError(msg);
-      toast.error('Texto vacío', msg);
+      if (!options?.silentToast) toast.error('Texto vacío', msg);
       return;
     }
 
     setIsGeneratingNarration(true);
     setNarrationError(null);
 
-    const toastId = toast.loading(
-      'Sintetizando Voz Neuronal...',
-      `Generando audio con voz ${voiceName} (${voiceGender}, ${voiceAccent})...`
-    );
+    const toastId = options?.silentToast
+      ? null
+      : toast.loading(
+          'Sintetizando Voz Neuronal...',
+          `Generando audio con voz ${voiceName} (${voiceGender}, ${voiceAccent})...`
+        );
 
     try {
       const response = await fetch('/api/narration', {
@@ -1871,10 +1894,11 @@ ${textoPdf || '{{texto_pdf}}'}
       });
 
       const data = await response.json();
-      if (!response.ok) {
+      if (!response.ok || !data.audioBase64) {
         throw new Error(data.error || 'Error al generar el audio de la narración.');
       }
 
+      const isSynthetic = Boolean(data.quotaFallback || data.isRealVoice === false);
       const processed = pcmBase64ToWav(data.audioBase64, data.sampleRate || 24000);
       const newTake: VoiceoverTake = {
         id: String(Date.now()).slice(-6),
@@ -1896,40 +1920,39 @@ ${textoPdf || '{{texto_pdf}}'}
         durationSec: processed.durationSec,
         peaks: processed.peaks,
         isFavorite: false,
+        isSyntheticFallback: isSynthetic,
       };
 
       setVoiceTakes((prev) => {
         const next = [newTake, ...prev];
         try {
-          window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(next));
-        } catch (_e) {}
+          // Persist recent real takes (limit to 3 to avoid localStorage quota overflow)
+          const persistable = next
+            .filter((t) => !t.isSyntheticFallback && t.audioBase64)
+            .slice(0, 3)
+            .map(({ wavUrl: _omitBlobUrl, ...rest }) => ({ ...rest, wavUrl: '' }));
+          window.localStorage.setItem('kinetix_voiceover_takes_v2', JSON.stringify(persistable));
+        } catch (_e) {
+          // Ignore storage quota errors
+        }
         return next;
       });
       setActiveTakeId(newTake.id);
 
-      toast.dismiss(toastId);
-      toast.success(
-        '¡Locución Sintetizada con Éxito!',
-        `Pista de voz (${processed.durationSec.toFixed(1)}s · 24 kHz) agregada a tu historial.`
-      );
-
-      if (data.quotaFallback && typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        try {
-          window.speechSynthesis.cancel();
-          const utterance = new SpeechSynthesisUtterance(textToSpeak);
-          utterance.lang = voiceAccent.toLowerCase().includes('españa') ? 'es-ES' : 'es-MX';
-          utterance.pitch = voiceGender === 'masculina' ? 0.88 : 1.08;
-          utterance.rate = 0.98;
-          window.speechSynthesis.speak(utterance);
-        } catch (_speechErr) {
-          // Ignore browser speech synthesis errors
-        }
+      if (toastId) {
+        toast.dismiss(toastId);
+        toast.success(
+          isSynthetic ? 'Voz en Vivo Activada' : '¡Locución IA Sintetizada con Éxito!',
+          isSynthetic
+            ? 'Se usará narración hablada en vivo del navegador al reproducir.'
+            : `Pista de voz real (${processed.durationSec.toFixed(1)}s · 24 kHz) lista para reproducir.`
+        );
       }
     } catch (err: any) {
-      toast.dismiss(toastId);
+      if (toastId) toast.dismiss(toastId);
       const errMsg = err?.message || 'Error al sintetizar la voz con IA.';
       setNarrationError(errMsg);
-      toast.error('Error al generar locución', errMsg);
+      if (!options?.silentToast) toast.error('Error al generar locución', errMsg);
     } finally {
       setIsGeneratingNarration(false);
     }
@@ -2135,6 +2158,13 @@ ${textoPdf || '{{texto_pdf}}'}
 
     const hasCustomShotImages = sequencePlan.shots.some((s) => Boolean(s.imageUrl));
 
+    const activeSeqSubtitles = loadSavedSubtitleSettings();
+    const activeSeqNarration =
+      activeTake?.fullScript ||
+      narrationScript ||
+      sequencePlan.suggestedVoiceover ||
+      '';
+
     try {
       if (hasCustomShotImages) {
         const composedMp4Url = await renderSequenceToVideoUrl(
@@ -2142,7 +2172,9 @@ ${textoPdf || '{{texto_pdf}}'}
           sequenceAspectRatio,
           veoResolution,
           (msg) => setVeoStatusMessage(msg),
-          selectedAudioB64
+          selectedAudioB64,
+          activeSeqSubtitles,
+          activeSeqNarration
         );
         setVeoVideoUrl(composedMp4Url);
         setVeoStatusMessage(null);
@@ -2168,7 +2200,9 @@ ${textoPdf || '{{texto_pdf}}'}
           sequenceAspectRatio,
           veoResolution,
           (msg) => setVeoStatusMessage(msg),
-          selectedAudioB64
+          selectedAudioB64,
+          activeSeqSubtitles,
+          activeSeqNarration
         );
         setVeoVideoUrl(fallbackVideoUrl);
         setVeoStatusMessage(null);
@@ -2213,7 +2247,9 @@ ${textoPdf || '{{texto_pdf}}'}
           sequenceAspectRatio,
           veoResolution,
           (msg) => setVeoStatusMessage(msg),
-          selectedAudioB64
+          selectedAudioB64,
+          activeSeqSubtitles,
+          activeSeqNarration
         );
         setVeoVideoUrl(fallbackVideoUrl);
         setVeoStatusMessage(null);
@@ -2234,7 +2270,9 @@ ${textoPdf || '{{texto_pdf}}'}
           sequenceAspectRatio,
           veoResolution,
           (msg) => setVeoStatusMessage(msg),
-          selectedAudioB64
+          selectedAudioB64,
+          activeSeqSubtitles,
+          activeSeqNarration
         );
         setVeoVideoUrl(fallbackVideoUrl);
         setVeoStatusMessage(null);
@@ -2254,7 +2292,9 @@ ${textoPdf || '{{texto_pdf}}'}
           sequenceAspectRatio,
           veoResolution,
           (msg) => setVeoStatusMessage(msg),
-          selectedAudioB64
+          selectedAudioB64,
+          activeSeqSubtitles,
+          activeSeqNarration
         );
         setVeoVideoUrl(fallbackVideoUrl);
         triggerDownloadUrl(fallbackVideoUrl, 'kinetix-video.mp4');
@@ -2518,6 +2558,11 @@ ${textoPdf || '{{texto_pdf}}'}
                 icon: BookOpen,
               },
               {
+                id: 'ai-pdf-creator' as const,
+                label: 'Crear PDF con IA',
+                icon: FilePlus2,
+              },
+              {
                 id: 'niche-gallery' as const,
                 label: t('tabGallery', currentLanguage),
                 icon: Layers,
@@ -2706,31 +2751,35 @@ ${textoPdf || '{{texto_pdf}}'}
               onLanguageChange={handleLanguageChange}
             />
 
-            {/* Reproducir Button: houses the full reproduction screen inside a clean modal */}
+            {/* Reproducir Button: ONLY enabled when a real audiobook has been created or restored */}
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={openPlayerModal}
-                disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                disabled={isGeneratingVideoBook || !hasCreatedVideoBook}
                 className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                   isPlayerModalOpen
                     ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
-                    : !isGeneratingVideoBook && videoBook.pages.length > 0
+                    : !isGeneratingVideoBook && hasCreatedVideoBook
                       ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                      : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
                 }`}
-                title="Abrir la pantalla de reproducción de tu audiolibro"
+                title={
+                  hasCreatedVideoBook
+                    ? 'Abrir la pantalla de reproducción de tu audiolibro creado'
+                    : 'Primero crea un audiolibro desde PDF o carga uno en Mi Biblioteca'
+                }
               >
                 {isGeneratingVideoBook ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Generando...</span>
+                    <span>Creando voz y video...</span>
                   </>
                 ) : (
                   <>
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span>Reproducir</span>
-                    {videoBook.pages.length > 0 && (
+                    {hasCreatedVideoBook && videoBook.pages.length > 0 && (
                       <span className="font-mono tabular-nums text-[11px] opacity-80">
                         ({videoBook.pages.length})
                       </span>
@@ -2756,8 +2805,10 @@ ${textoPdf || '{{texto_pdf}}'}
 
         {/* Hidden Background Audio Element for Neural Voice Takes */}
         <audio
+          key={activeTake?.id || 'no-audio'}
           ref={bgAudioRef}
-          src={activeTake?.wavUrl || undefined}
+          src={activeTake && !activeTake.isSyntheticFallback ? activeTake.wavUrl : undefined}
+          preload="auto"
           onEnded={() => {
             bgPlayingRef.current = false;
             setIsBgPlaying(false);
@@ -2780,6 +2831,7 @@ ${textoPdf || '{{texto_pdf}}'}
             userTokenBalance={userTokenBalance}
             isGenerating={isGeneratingVideoBook || isExportingBookMp4}
             isPlayingBg={isPlayerModalOpen}
+            canPlay={hasCreatedVideoBook}
             language={currentLanguage}
           />
 
@@ -2848,10 +2900,111 @@ ${textoPdf || '{{texto_pdf}}'}
               currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
               savedAudiobooks={savedAudiobooks}
               onExportCurrentMp3={handleExportVideoBookMp3}
-              onExportCurrentMp4={handleExportVideoBookMp4}
+              onExportCurrentMp4={() => handleExportVideoBookMp4()}
               externalCheckoutProduct={externalPayPalProduct}
               onClearExternalCheckout={() => setExternalPayPalProduct(null)}
               onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+            />
+          )}
+
+          {/* =====================================================================
+              MODULE: CREAR PDF CON IA (ALL TOOLS ATTACHED)
+             ===================================================================== */}
+          {activeModule === 'ai-pdf-creator' && (
+            <AiPdfCreatorStudio
+              selectedAvatar={selectedAvatar}
+              onSelectAvatar={(av) => {
+                setSelectedAvatar(av);
+                setCustomAvatarUrl(undefined);
+                setVoiceName(av.voiceName);
+                setVoiceGender(av.gender);
+              }}
+              onConvertToAudiobook={async (createdBook, imagesMap, prebuiltAudio) => {
+                setVideoBook(createdBook);
+                setPageImages(imagesMap);
+                setActiveBookPageIdx(0);
+                setExportedBookMp4Url(null);
+                setHasCreatedVideoBook(true);
+                setNarrationScript(createdBook.fullNarration);
+                setActiveModule('videobook');
+
+                if (prebuiltAudio && prebuiltAudio.audioBase64) {
+                  const newTake: VoiceoverTake = {
+                    id: `take-pdf-${Date.now()}`,
+                    createdAt: new Date().toLocaleTimeString('es-ES', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }),
+                    voiceGender: selectedAvatar.gender,
+                    voiceName: selectedAvatar.voiceName,
+                    accent: selectedAvatar.accent,
+                    tone: 'narrador editorial cálido',
+                    executedPrompt: `Locución PDF IA · ${createdBook.bookTitle}`,
+                    durationSec: prebuiltAudio.durationSec,
+                    wavUrl: prebuiltAudio.wavUrl,
+                    audioBase64: prebuiltAudio.audioBase64,
+                    scriptExcerpt: prebuiltAudio.fullScript.slice(0, 95),
+                    fullScript: prebuiltAudio.fullScript,
+                    peaks: Array.from({ length: 36 }, (_, i) => 0.35 + ((i * 19) % 55) / 100),
+                    isSyntheticFallback: false,
+                  };
+                  setVoiceTakes((prev) => [newTake, ...prev]);
+                  setActiveTakeId(newTake.id);
+                  stopBackgroundPlayback();
+                  setIsPlayerModalOpen(true);
+                  setPlayerAutoPlayTrigger((prev) => prev + 1);
+                  toast.success(
+                    'PDF convertido a Audiolibro IA',
+                    'Reproduciendo con voz neuronal 24kHz y subtítulos dinámicos.'
+                  );
+                } else {
+                  toast.success(
+                    'PDF cargado en Audiolibro IA',
+                    'Sintetizando la voz neuronal 24kHz para tu reproducción...'
+                  );
+                  await handleGenerateNarration(createdBook.fullNarration, {
+                    silentToast: true,
+                  });
+                  stopBackgroundPlayback();
+                  setIsPlayerModalOpen(true);
+                  setPlayerAutoPlayTrigger((prev) => prev + 1);
+                }
+              }}
+              onSendToPdfDirector={(text, filename) => {
+                setTextoPdf(text);
+                setUploadedPdfName(filename);
+                setActiveModule('pdf-director');
+                toast.success('Enviado a Director PDF', 'Tu PDF IA está listo para Storyboard.');
+              }}
+              onSendToScript={(pdfTopic, fullText) => {
+                setScriptTopic(`${pdfTopic} — ${fullText.slice(0, 400)}`);
+                setActiveModule('script');
+                toast.success('Enviado a Guiones', 'Tu PDF IA se cargó para adaptación de guion.');
+              }}
+              onSendToNarration={(narrationText) => {
+                setNarrationScript(narrationText);
+                setActiveModule('narration');
+                toast.success('Enviado a Voz IA (TTS)', 'Guion de narración listo para locución.');
+              }}
+              onSendToSequence={(title, narrationText, firstImage) => {
+                setNarrationScript(narrationText);
+                setSequencePlan((prev) => ({
+                  ...prev,
+                  title,
+                  suggestedVoiceover: narrationText.slice(0, 600),
+                  shots: prev.shots.map((s, idx) =>
+                    idx === 0 && firstImage ? { ...s, headlineText: title, imageUrl: firstImage } : s
+                  ),
+                }));
+                setActiveModule('sequence');
+                toast.success(
+                  'Enviado a Clips & Video MP4',
+                  'Narración y subtítulos dinámicos cargados en el renderizador.'
+                );
+              }}
+              onMonetizePdf={(title, summary) => {
+                handleOpenPayPalForBook(title, summary, pageImages[0], 6);
+              }}
             />
           )}
 
@@ -3225,20 +3378,24 @@ ${textoPdf || '{{texto_pdf}}'}
                           <span>Generar Completo (Voz + Video)</span>
                         </button>
 
-                        {/* Botón 'Reproducir aquí (sin pantalla)' + 'Reproducir video' - Se activan automáticamente al finalizar isGeneratingVideoBook */}
+                        {/* Botón 'Escuchar aquí' + 'Reproducir video' — Se activan SOLO cuando ya existe un audiolibro creado */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <button
                             type="button"
                             onClick={handleToggleBackgroundPlay}
-                            disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                            disabled={isGeneratingVideoBook || !hasCreatedVideoBook}
                             className={`py-3 px-3 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                               isBgPlaying
                                 ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
-                                : !isGeneratingVideoBook && videoBook.pages.length > 0
+                                : !isGeneratingVideoBook && hasCreatedVideoBook
                                   ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
                                   : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
                             }`}
-                            title="Reproducir o pausar el audio directamente aquí sin abrir la pantalla de video"
+                            title={
+                              hasCreatedVideoBook
+                                ? 'Escuchar el audiolibro creado sin abrir la pantalla de video'
+                                : 'Primero crea un audiolibro desde tu PDF para poder escucharlo'
+                            }
                           >
                             {isBgPlaying ? (
                               <>
@@ -3256,18 +3413,22 @@ ${textoPdf || '{{texto_pdf}}'}
                           <button
                             type="button"
                             onClick={openPlayerModal}
-                            disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                            disabled={isGeneratingVideoBook || !hasCreatedVideoBook}
                             className={`py-3 px-3 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                              !isGeneratingVideoBook && videoBook.pages.length > 0
+                              !isGeneratingVideoBook && hasCreatedVideoBook
                                 ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300'
                                 : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
                             }`}
-                            title="Abrir la pantalla de reproducción de video dentro de este botón"
+                            title={
+                              hasCreatedVideoBook
+                                ? 'Abrir la pantalla de reproducción de video del audiolibro creado'
+                                : 'Primero crea un audiolibro desde tu PDF para poder reproducirlo'
+                            }
                           >
                             {isGeneratingVideoBook ? (
                               <>
                                 <Loader2 className="w-4 h-4 animate-spin text-slate-700 shrink-0" />
-                                <span className="text-slate-700">Preparando...</span>
+                                <span className="text-slate-700">Creando voz...</span>
                               </>
                             ) : (
                               <>
@@ -3278,13 +3439,19 @@ ${textoPdf || '{{texto_pdf}}'}
                           </button>
                         </div>
 
+                        {!hasCreatedVideoBook && !isGeneratingVideoBook && (
+                          <p className="text-[11px] text-slate-500 text-center">
+                            Pulsa <strong>Crear Audiolibro desde PDF</strong> para activar la reproducción con voz real.
+                          </p>
+                        )}
+
                         {/* Quick Save MP3 / MP4 Row */}
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
                             onClick={() => handleSaveCurrentAudiobookToFolder('MP3')}
-                            disabled={isSavingToFolder !== null}
-                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            disabled={isSavingToFolder !== null || !hasCreatedVideoBook}
+                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <FolderOpen className="w-3.5 h-3.5 text-amber-700" />
                             <span>Guardar MP3</span>
@@ -3292,8 +3459,8 @@ ${textoPdf || '{{texto_pdf}}'}
                           <button
                             type="button"
                             onClick={() => handleSaveCurrentAudiobookToFolder('MP4')}
-                            disabled={isSavingToFolder !== null}
-                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            disabled={isSavingToFolder !== null || !hasCreatedVideoBook}
+                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <FolderOpen className="w-3.5 h-3.5 text-amber-700" />
                             <span>Guardar MP4</span>
@@ -3321,7 +3488,9 @@ ${textoPdf || '{{texto_pdf}}'}
                   }}
                   onSaveCurrentAudiobook={handleSaveCurrentAudiobookToFolder}
                   onRestoreAudiobookToStudio={(item) => {
+                    stopBackgroundPlayback();
                     setVideoBook(item.videoBook);
+                    setHasCreatedVideoBook(true);
                     setPageImages(item.pageImages || {});
                     setActiveBookPageIdx(0);
                     setAudiobookVisualMode(item.visualMode || 'avatar-and-scenes');
@@ -3333,15 +3502,57 @@ ${textoPdf || '{{texto_pdf}}'}
                       setVoiceName(foundAv.voiceName);
                       setVoiceGender(foundAv.gender);
                     }
-                    if (item.videoBook.fullNarration) {
-                      setNarrationScript(item.videoBook.fullNarration);
+                    const fullNarr =
+                      item.videoBook.fullNarration ||
+                      item.videoBook.pages
+                        .map((p) => `${p.chapterTitle}. ${p.pageText}`)
+                        .join(' ');
+                    if (fullNarr) {
+                      setNarrationScript(fullNarr);
                     }
-                    stopBackgroundPlayback();
+
+                    // Restore this audiobook's own real audio track if saved, otherwise synthesize real voice
+                    if (item.audioBase64 && item.audioBase64.length > 100) {
+                      try {
+                        const processed = pcmBase64ToWav(item.audioBase64, 24000);
+                        const restoredTake: VoiceoverTake = {
+                          id: `restored-${item.id}`,
+                          createdAt: item.createdAt || 'Guardado',
+                          scriptExcerpt: fullNarr.slice(0, 95),
+                          fullScript: fullNarr,
+                          voiceGender: foundAv?.gender || voiceGender,
+                          voiceName: foundAv?.voiceName || voiceName,
+                          accent: voiceAccent,
+                          tone: voiceTone,
+                          executedPrompt: `Audiolibro restaurado: ${item.title}`,
+                          wavUrl: processed.wavUrl,
+                          audioBase64: item.audioBase64,
+                          durationSec: processed.durationSec,
+                          peaks: processed.peaks,
+                          isFavorite: item.isFavorite,
+                          isSyntheticFallback: false,
+                        };
+                        setVoiceTakes((prev) => [
+                          restoredTake,
+                          ...prev.filter((t) => t.id !== restoredTake.id),
+                        ]);
+                        setActiveTakeId(restoredTake.id);
+                      } catch {
+                        setActiveTakeId(null);
+                        handleGenerateNarration(fullNarr, { silentToast: true });
+                      }
+                    } else {
+                      setActiveTakeId(null);
+                      if (fullNarr) {
+                        handleGenerateNarration(fullNarr, { silentToast: true });
+                      }
+                    }
+
                     setIsPlayerModalOpen(true);
                     setPlayerAutoPlayTrigger((prev) => prev + 1);
                     toast.success(
                       'Audiolibro Cargado en Reproductor',
-                      `"${item.title}" listo para reproducir.`
+                      `"${item.title}" listo para reproducir con audio.`
                     );
                   }}
                   onMoveToFolder={(itemId, newFolder) => {
@@ -5958,6 +6169,9 @@ ${textoPdf || '{{texto_pdf}}'}
                   audioUrl={attachVoiceoverToSequence && activeTake ? activeTake.wavUrl : null}
                   audioBase64={
                     attachVoiceoverToSequence && activeTake ? activeTake.audioBase64 : null
+                  }
+                  narrationText={
+                    activeTake?.fullScript || narrationScript || sequencePlan.suggestedVoiceover
                   }
                   aspectRatio={sequenceAspectRatio}
                   activeShotIndex={activeShotIndex}

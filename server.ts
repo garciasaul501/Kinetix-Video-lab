@@ -10,7 +10,7 @@ import zlib from 'zlib';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type, GenerateVideosOperation } from '@google/genai';
+import { GoogleGenAI, Type, ThinkingLevel, GenerateVideosOperation } from '@google/genai';
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -631,7 +631,8 @@ async function generateFallbackPngBase64(
 function buildFallbackVideoBook(
   textoPdf: string,
   bookStyle = 'Ilustración Editorial Cinematográfica',
-  filename = 'Documento PDF'
+  filename = 'Documento PDF',
+  requestedChapters = 5
 ) {
   const cleanText = (textoPdf || '').replace(/\s+/g, ' ').trim();
   const sentences = cleanText
@@ -651,7 +652,7 @@ function buildFallbackVideoBook(
     { primary: '#1A1215', secondary: '#382028', accent: '#FBBF24' },
   ];
 
-  const pageCount = 5;
+  const pageCount = Math.min(12, Math.max(5, Number(requestedChapters) || 5));
   const chunkSize = Math.max(1, Math.ceil(sentences.length / pageCount));
 
   const chapterDefaults = [
@@ -723,6 +724,8 @@ async function startServer() {
       bookStyle = 'Ilustración Editorial Cinematográfica',
       filename = 'Documento PDF',
       chaptersCount,
+      targetChapters,
+      durationMode = 'unlimited',
       unlimitedDuration = true,
     } = req.body || {};
 
@@ -731,14 +734,17 @@ async function startServer() {
       'La lectura audiovisual combina la profundidad de los libros con la fuerza de las imágenes y la voz narrada.';
 
     const wordCountEst = cleanPdf.split(/\s+/).filter(Boolean).length;
+    const rawChapters = Number(chaptersCount ?? targetChapters);
     const requestedChapters =
-      Number(chaptersCount) > 0
-        ? Math.min(20, Math.max(5, Number(chaptersCount)))
+      rawChapters > 0
+        ? Math.min(20, Math.max(5, rawChapters))
         : wordCountEst > 350
         ? 8
         : 6;
+    const isUnlimited = durationMode !== 'standard' && unlimitedDuration !== false;
 
     const bookSchema = {
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       systemInstruction:
         'Eres un Editor Literario Senior y Director de Audiolibros en Video Sin Límite de Tiempo (Video-eBooks). Tu misión es transformar el texto extraído de un PDF en un Audiolibro en Video con capítulos claros, completos, fáciles de leer y listos para ser narrados en voz alta sin límite de duración.',
       responseMimeType: 'application/json',
@@ -793,7 +799,7 @@ async function startServer() {
     };
 
     const prompt = `Convierte el siguiente contenido extraído de un documento PDF en un Audiolibro en Video (Video-eBook) dividido en ${requestedChapters} capítulos ilustrados y narrados (${
-      unlimitedDuration ? 'Sin límite de tiempo, desarrollando cada capítulo con riqueza y claridad' : 'Duración optimizada'
+      isUnlimited ? 'Sin límite de tiempo, desarrollando cada capítulo con riqueza y claridad' : 'Duración optimizada'
     }).
 Estilo visual de las ilustraciones: ${bookStyle}.
 Archivo fuente: ${filename}.
@@ -817,24 +823,51 @@ Para cada uno de los ${requestedChapters} capítulos incluye:
       let responseText = '';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: prompt,
           config: bookSchema,
         });
         responseText = response.text || '';
       } catch (_firstErr) {
+        const { thinkingConfig: _omitThinking, ...liteSchema } = bookSchema;
         const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite',
+          model: 'gemini-3.1-flash-lite',
           contents: prompt,
-          config: bookSchema,
+          config: liteSchema,
         });
         responseText = fallbackRes.text || '';
       }
 
       const parsed = JSON.parse(responseText || '{}');
+      if (!parsed || !Array.isArray(parsed.pages) || parsed.pages.length === 0) {
+        throw new Error('Estructura de capítulos vacía');
+      }
+      const computedFullNarration = parsed.pages
+        .map(
+          (p: any, idx: number) =>
+            `${p.chapterTitle || `Capítulo ${idx + 1}`}. ${p.pageText || ''}`
+        )
+        .join(' ')
+        .trim();
+      parsed.fullNarration =
+        parsed.fullNarration && String(parsed.fullNarration).trim().length >= 40
+          ? String(parsed.fullNarration).trim()
+          : computedFullNarration;
+      parsed.totalEstimatedSec =
+        Number(parsed.totalEstimatedSec) > 0
+          ? Number(parsed.totalEstimatedSec)
+          : parsed.pages.reduce(
+              (acc: number, p: any) => acc + Math.max(5, Number(p.durationSec) || 10),
+              0
+            );
       res.json({ videoBook: parsed, quotaFallback: false });
     } catch (_err) {
-      const fallbackBook = buildFallbackVideoBook(cleanPdf, bookStyle, filename);
+      const fallbackBook = buildFallbackVideoBook(
+        cleanPdf,
+        bookStyle,
+        filename,
+        requestedChapters
+      );
       res.json({ videoBook: fallbackBook, quotaFallback: true });
     }
   });
@@ -889,7 +922,7 @@ Para cada uno de los ${requestedChapters} capítulos incluye:
         try {
           const ai = getGenAIClient();
           const geminiRes = await ai.models.generateContent({
-            model: 'gemini-3.8-flash-lite',
+            model: 'gemini-4-hydrogen',
             contents: [
               {
                 role: 'user',
@@ -1081,14 +1114,17 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       let responseText = '';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: structuredPrompt,
-          config: proposalSchemaConfig,
+          config: {
+            ...proposalSchemaConfig,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
         });
         responseText = response.text || '';
       } catch (_firstErr) {
         const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite',
+          model: 'gemini-3.1-flash-lite',
           contents: structuredPrompt,
           config: proposalSchemaConfig,
         });
@@ -1188,14 +1224,17 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       let responseText = '';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents: fullContents,
-          config: schemaConfig,
+          config: {
+            ...schemaConfig,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
         });
         responseText = response.text || '';
       } catch (_firstErr) {
         const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite',
+          model: 'gemini-3.1-flash-lite',
           contents: fullContents,
           config: schemaConfig,
         });
@@ -1214,7 +1253,7 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
     }
   });
 
-  // 2. Generate Voiceover Narration (TTS)
+  // 2. Generate Voiceover Narration (TTS) — Supports full multi-chapter audiobooks via chunked WAV concatenation
   app.post('/api/narration', async (req, res) => {
     const { scriptText, voiceGender, voiceName, accent, tone } = req.body || {};
     if (!scriptText || !scriptText.trim()) {
@@ -1229,96 +1268,126 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
     }
 
     const stylePrompt = `Voz ${voiceGender || 'femenina'}, con acento ${accent || 'español neutro'} y un tono ${tone || 'cinematográfico y expresivo'}.`;
-    const fullPromptDescription = `Genera una narración para el siguiente guion de video: "${scriptText.slice(0, 120)}${scriptText.length > 120 ? '...' : ''}". La voz debe ser ${voiceGender || 'femenina'}, con un acento ${accent || 'español neutro'} y un tono ${tone || 'cinematográfico'}.`;
+    const cleanScript = scriptText.replace(/\s+/g, ' ').trim();
+    const fullPromptDescription = `Genera una narración para el siguiente guion de video: "${cleanScript.slice(0, 120)}${cleanScript.length > 120 ? '...' : ''}". La voz debe ser ${voiceGender || 'femenina'}, con un acento ${accent || 'español neutro'} y un tono ${tone || 'cinematográfico'}.`;
 
-    try {
-      const ai = getGenAIClient();
-      let base64Audio: string | undefined;
-      let mimeType = 'audio/pcm;rate=24000';
+    // Split long audiobook text cleanly along sentence boundaries (<= 1400 chars per TTS call)
+    const splitIntoChunks = (text: string, maxChars = 1400): string[] => {
+      if (text.length <= maxChars) return [text];
+      const sentences = text.split(/(?<=[.!?])\s+/).filter(Boolean);
+      const chunks: string[] = [];
+      let current = '';
+      for (const s of sentences) {
+        if ((current + ' ' + s).trim().length <= maxChars) {
+          current = (current + ' ' + s).trim();
+        } else {
+          if (current) chunks.push(current);
+          current = s.length > maxChars ? s.slice(0, maxChars) : s;
+        }
+      }
+      if (current) chunks.push(current);
+      return chunks.slice(0, 6);
+    };
+
+    const stripWavHeaderIfPresent = (buf: Buffer): Buffer => {
+      if (
+        buf.length > 44 &&
+        buf[0] === 0x52 &&
+        buf[1] === 0x49 &&
+        buf[2] === 0x46 &&
+        buf[3] === 0x46
+      ) {
+        return buf.subarray(44);
+      }
+      return buf;
+    };
+
+    const synthesizeChunk = async (ai: GoogleGenAI, chunkText: string): Promise<Buffer> => {
+      const requestBody = {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              {
+                text: chunkText,
+                speechMetadata: { style: stylePrompt },
+              } as any,
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: selectedVoice },
+            },
+          },
+        },
+      };
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: scriptText.trim(),
-                  speechMetadata: { style: stylePrompt },
-                } as any,
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: selectedVoice },
-              },
-            },
-          },
-        });
-
-        const part = response.candidates?.[0]?.content?.parts?.[0];
-        base64Audio = part?.inlineData?.data;
-        if (part?.inlineData?.mimeType) {
-          mimeType = part.inlineData.mimeType;
-        }
-      } catch (_primaryErr) {
-        const fallbackResponse = await ai.models.generateContent({
           model: 'gemini-3.8-flash-lite-tts',
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                {
-                  text: scriptText.trim(),
-                  speechMetadata: { style: stylePrompt },
-                } as any,
-              ],
-            },
-          ],
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: selectedVoice },
-              },
-            },
-          },
+          ...requestBody,
         });
-        const part = fallbackResponse.candidates?.[0]?.content?.parts?.[0];
-        base64Audio = part?.inlineData?.data;
-        if (part?.inlineData?.mimeType) {
-          mimeType = part.inlineData.mimeType;
-        }
+        const data = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+        if (data) return Buffer.from(data, 'base64');
+      } catch (_liteErr) {
+        // Try flagship TTS model
       }
 
-      if (!base64Audio) {
-        throw new Error('No audio data returned');
+      const flagshipResponse = await ai.models.generateContent({
+        model: 'gemini-3.8-flash-tts',
+        ...requestBody,
+      });
+      const fallbackData = flagshipResponse.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!fallbackData) {
+        throw new Error('No se recibió audio del modelo TTS');
       }
+      return Buffer.from(fallbackData, 'base64');
+    };
+
+    try {
+      const ai = getGenAIClient();
+      const chunks = splitIntoChunks(cleanScript, 1400);
+      const pcmParts: Buffer[] = [];
+
+      for (const chunk of chunks) {
+        const chunkBuf = await synthesizeChunk(ai, chunk);
+        pcmParts.push(stripWavHeaderIfPresent(chunkBuf));
+      }
+
+      const combinedPcm = Buffer.concat(pcmParts);
+      if (combinedPcm.length < 100) {
+        throw new Error('Audio generado vacío');
+      }
+
+      const finalWav = wrapPcmInWavHeader(combinedPcm, 24000);
 
       res.json({
-        audioBase64: base64Audio,
-        mimeType,
+        audioBase64: finalWav.toString('base64'),
+        mimeType: 'audio/wav',
         sampleRate: 24000,
         voiceUsed: selectedVoice,
         stylePrompt,
         executedPrompt: fullPromptDescription,
+        isRealVoice: true,
+        quotaFallback: false,
       });
-    } catch (_error: any) {
+    } catch (error: any) {
+      console.error('[Narration TTS Error]:', error?.message || error);
       const synthesizedBuffer = generateSynthesizedSpeechEnvelopePcmBuffer(
-        scriptText,
+        cleanScript,
         voiceGender
       );
       res.json({
-        audioBase64: synthesizedBuffer.toString('base64'),
-        mimeType: 'audio/pcm;rate=24000',
+        audioBase64: wrapPcmInWavHeader(synthesizedBuffer, 24000).toString('base64'),
+        mimeType: 'audio/wav',
         sampleRate: 24000,
         voiceUsed: selectedVoice,
         stylePrompt,
         executedPrompt: fullPromptDescription,
+        isRealVoice: false,
         quotaFallback: true,
       });
     }
@@ -1399,14 +1468,17 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       let responseText = '';
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: 'gemini-4-hydrogen',
           contents,
-          config: seqConfig,
+          config: {
+            ...seqConfig,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
         });
         responseText = response.text || '';
       } catch (_firstErr) {
         const fallbackRes = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-lite',
+          model: 'gemini-3.1-flash-lite',
           contents,
           config: seqConfig,
         });
@@ -1986,12 +2058,11 @@ ${keyFeatures}
       contents.push({ role: 'user', parts: [{ text: userMsg }] });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+        model: 'gemini-4-hydrogen',
         contents,
         config: {
           systemInstruction,
-          temperature: 0.25,
-          maxOutputTokens: 500,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         },
       });
 
@@ -2070,6 +2141,253 @@ ${keyFeatures}
 
     const formattedFallback = `**Respuesta Directa**: ${direct}\n\n**Paso a Paso**:\n${steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n**Tip / Siguiente Paso**:\n• ${tip}`;
     res.json({ reply: formattedFallback });
+  });
+
+  // ============================================================================
+  // 12. AI PDF DOCUMENT CREATOR (Crear PDF con IA)
+  // Generates complete, publication-ready structured PDFs from a topic/prompt
+  // and/or attached reference PDF/TXT content, ready for PDF export, TTS audio,
+  // Audiolibro IA, Storyboard, and MP4 Video.
+  // ============================================================================
+  app.post('/api/generate-ai-pdf', async (req, res) => {
+    const {
+      topic = '',
+      docType = 'Libro / Ebook Editorial',
+      tone = 'Profesional, claro y persuasivo',
+      sectionsCount = 6,
+      language = 'Español',
+      author = 'Kinetix Studio IA',
+      attachedText = '',
+      attachedFilename = '',
+    } = req.body || {};
+
+    const cleanTopic = String(topic || '').trim();
+    const cleanAttached = String(attachedText || '').trim();
+    const numSections = Math.max(3, Math.min(12, Number(sectionsCount) || 6));
+
+    if (!cleanTopic && !cleanAttached) {
+      res.status(400).json({
+        error: 'Escribe un tema o adjunta un documento de referencia para crear tu PDF con IA.',
+      });
+      return;
+    }
+
+    const fallbackBuilder = () => {
+      const baseTitle = cleanTopic
+        ? cleanTopic.slice(0, 78)
+        : attachedFilename
+          ? attachedFilename.replace(/\.[^.]+$/, '')
+          : 'Documento Editorial IA';
+      const sourceSnippet = cleanAttached
+        ? cleanAttached.slice(0, 1200)
+        : `Guía integral diseñada sobre "${baseTitle}" con enfoque ${tone.toLowerCase()}, lista para exportar en PDF profesional, narrar con voz IA y convertir en audiolibro o video.`;
+
+      const sectionTemplates = [
+        'Introducción y Visión Estratégica',
+        'Fundamentos Esenciales y Contexto',
+        'Metodología Práctica Paso a Paso',
+        'Herramientas y Aplicación en Escenarios Reales',
+        'Errores Comunes y Mejores Prácticas',
+        'Casos de Éxito y Resultados Medibles',
+        'Plan de Implementación de 30 Días',
+        'Escalabilidad y Optimización Continua',
+        'Recursos Complementarios y Plantillas',
+        'Conclusiones y Próximos Pasos',
+        'Anexo Técnico de Referencia',
+        'Hoja de Ruta Final',
+      ];
+
+      const sections = Array.from({ length: numSections }, (_, i) => {
+        const heading = sectionTemplates[i % sectionTemplates.length];
+        const attachedChunk = cleanAttached
+          ? cleanAttached
+              .slice(
+                Math.floor((i * cleanAttached.length) / numSections),
+                Math.floor(((i + 1) * cleanAttached.length) / numSections)
+              )
+              .trim()
+              .slice(0, 520)
+          : '';
+        const body = attachedChunk
+          ? `${attachedChunk} En esta sección profundizamos en ${heading.toLowerCase()} aplicado a ${baseTitle}, integrando criterios claros de ejecución inmediata.`
+          : `Esta sección aborda ${heading.toLowerCase()} dentro de ${baseTitle}. Con un estilo ${tone.toLowerCase()}, presenta los principios accionables que permiten pasar de la teoría a resultados tangibles desde el primer día.`;
+
+        return {
+          sectionNumber: i + 1,
+          heading,
+          body,
+          keyPoints: [
+            `Aplicación directa de ${heading.toLowerCase()} en ${baseTitle}.`,
+            'Checklist claro para medir avances y mantener consistencia.',
+            'Enfoque práctico listo para publicar, compartir o narrar.',
+          ],
+          highlightQuote: `La claridad en ${heading.toLowerCase()} transforma cualquier proyecto en una obra memorable.`,
+          imagePrompt: `Cinematic editorial photography representing ${heading} for ${baseTitle}, warm golden key light, ultra crisp 8k composition`,
+        };
+      });
+
+      const fullNarration = sections
+        .map((s) => `Sección ${s.sectionNumber}: ${s.heading}. ${s.body}`)
+        .join(' ');
+
+      return {
+        title: baseTitle,
+        subtitle: `${docType} · Generado y estructurado con herramientas integradas de Kinetix`,
+        author: String(author || 'Kinetix Studio IA'),
+        docType: String(docType),
+        category: cleanTopic ? 'Editorial & Estrategia' : 'Adaptación Documental',
+        language: String(language),
+        executiveSummary: sourceSnippet.slice(0, 340),
+        sections,
+        fullNarration,
+        createdAt: new Date().toLocaleDateString('es-ES'),
+      };
+    };
+
+    try {
+      const ai = getGenAIClient();
+      const pdfSchema = {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          subtitle: { type: Type.STRING },
+          author: { type: Type.STRING },
+          docType: { type: Type.STRING },
+          category: { type: Type.STRING },
+          language: { type: Type.STRING },
+          executiveSummary: { type: Type.STRING },
+          sections: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                sectionNumber: { type: Type.INTEGER },
+                heading: { type: Type.STRING },
+                body: { type: Type.STRING },
+                keyPoints: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                },
+                highlightQuote: { type: Type.STRING },
+                imagePrompt: { type: Type.STRING },
+              },
+              required: [
+                'sectionNumber',
+                'heading',
+                'body',
+                'keyPoints',
+                'highlightQuote',
+                'imagePrompt',
+              ],
+            },
+          },
+          fullNarration: { type: Type.STRING },
+        },
+        required: [
+          'title',
+          'subtitle',
+          'author',
+          'docType',
+          'category',
+          'language',
+          'executiveSummary',
+          'sections',
+          'fullNarration',
+        ],
+      };
+
+      const promptParts = [
+        `Eres un editor y autor editorial experto. Crea un documento PDF completo, original y listo para publicar en idioma ${language}.`,
+        `Tipo de documento: ${docType}.`,
+        `Tono editorial: ${tone}.`,
+        `Autor a acreditar: ${author || 'Kinetix Studio IA'}.`,
+        `Cantidad exacta de secciones/capítulos: ${numSections}.`,
+      ];
+
+      if (cleanTopic) {
+        promptParts.push(`Tema o solicitud principal del usuario:\n"${cleanTopic}"`);
+      }
+
+      if (cleanAttached) {
+        promptParts.push(
+          `Material adjunto de referencia (${attachedFilename || 'documento adjunto'} — incorpóralo, sintetízalo y amplíalo coherentemente):\n"""\n${cleanAttached.slice(0, 10000)}\n"""`
+        );
+      }
+
+      promptParts.push(
+        `Requisitos de calidad:\n` +
+          `1. Cada sección debe tener un título fuerte, un cuerpo bien redactado de 90 a 160 palabras, 3 puntos clave accionables (keyPoints), 1 cita destacada memorable (highlightQuote), y un prompt visual cinematográfico en inglés para ilustración (imagePrompt).\n` +
+          `2. El campo fullNarration debe ser un guion corrido, fluido y natural pensado para locución de audiolibro y subtítulos dinámicos.\n` +
+          `3. Responde únicamente con el JSON estructurado.`
+      );
+
+      let response;
+      try {
+        response = await ai.models.generateContent({
+          model: 'gemini-4-hydrogen',
+          contents: promptParts.join('\n\n'),
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: pdfSchema,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+      } catch (_primaryErr) {
+        response = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-lite',
+          contents: promptParts.join('\n\n'),
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: pdfSchema,
+          },
+        });
+      }
+
+      const parsed = JSON.parse(response.text || '{}');
+      if (!parsed.title || !Array.isArray(parsed.sections) || parsed.sections.length === 0) {
+        throw new Error('Respuesta JSON incompleta');
+      }
+
+      const normalizedSections = parsed.sections.map((s: any, idx: number) => ({
+        sectionNumber: idx + 1,
+        heading: String(s.heading || `Sección ${idx + 1}`),
+        body: String(s.body || ''),
+        keyPoints: Array.isArray(s.keyPoints) ? s.keyPoints.map(String).slice(0, 5) : [],
+        highlightQuote: String(s.highlightQuote || ''),
+        imagePrompt: String(
+          s.imagePrompt ||
+            `Cinematic editorial photography for ${s.heading || parsed.title}, golden studio light, 8k`
+        ),
+      }));
+
+      const fullNarration =
+        typeof parsed.fullNarration === 'string' && parsed.fullNarration.trim().length > 40
+          ? parsed.fullNarration.trim()
+          : normalizedSections
+              .map((s: any) => `Sección ${s.sectionNumber}: ${s.heading}. ${s.body}`)
+              .join(' ');
+
+      res.json({
+        pdfDocument: {
+          title: String(parsed.title),
+          subtitle: String(parsed.subtitle || docType),
+          author: String(parsed.author || author || 'Kinetix Studio IA'),
+          docType: String(parsed.docType || docType),
+          category: String(parsed.category || 'Editorial IA'),
+          language: String(parsed.language || language),
+          executiveSummary: String(parsed.executiveSummary || ''),
+          sections: normalizedSections,
+          fullNarration,
+          createdAt: new Date().toLocaleDateString('es-ES'),
+        },
+        quotaFallback: false,
+      });
+    } catch (_err) {
+      res.json({
+        pdfDocument: fallbackBuilder(),
+        quotaFallback: true,
+      });
+    }
   });
 
   // ============================================================================

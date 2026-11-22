@@ -28,13 +28,23 @@ import {
   Layers,
   Check,
   Sliders,
+  Subtitles,
 } from 'lucide-react';
 import {
   VideoBook,
   AudiobookVisualMode,
   VideoExportSettings,
   DEFAULT_VIDEO_EXPORT_SETTINGS,
+  DynamicSubtitleSettings,
+  DynamicSubtitleSize,
+  DynamicSubtitlePosition,
+  SUBTITLE_COLOR_PRESETS,
+  loadSavedSubtitleSettings,
+  saveSubtitleSettings,
+  generateDynamicSubtitles,
+  getActiveSubtitleCue,
 } from '../utils/videoRenderer';
+import { exportDynamicSubtitlesAsSrt } from '../utils/scriptExporter';
 import { VoiceoverTake } from './StudioAudioPlayer';
 import {
   TalkingAvatarStage,
@@ -70,7 +80,10 @@ interface VideoBookPlayerProps {
   isExportingMp4: boolean;
   mp4Progress: number;
   exportedMp4Url: string | null;
-  onExportMp4: (settings?: VideoExportSettings) => void;
+  onExportMp4: (
+    settings?: VideoExportSettings,
+    subtitleSettings?: DynamicSubtitleSettings
+  ) => void;
   onExportMp3: () => void;
   onExportPdf: () => void;
   onExportTxt: () => void;
@@ -146,6 +159,19 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     } catch {}
   };
 
+  // Dynamic Subtitles Configuration (Size, Color, Position, Enable/Disable)
+  const [subtitleSettings, setSubtitleSettings] = useState<DynamicSubtitleSettings>(() =>
+    loadSavedSubtitleSettings()
+  );
+
+  const handleUpdateSubtitleSettings = (patch: Partial<DynamicSubtitleSettings>) => {
+    setSubtitleSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveSubtitleSettings(next);
+      return next;
+    });
+  };
+
   // 30 Realistic AI Avatars Gallery State
   const [showAvatarGallery, setShowAvatarGallery] = useState<boolean>(true);
   const [selectedCategory, setSelectedCategory] = useState<'Todos' | AvatarCategory>('Todos');
@@ -170,25 +196,64 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
   const lastSpokenPageRef = useRef<number | null>(null);
+  const prevTakeIdRef = useRef<string | null | undefined>(undefined);
+  const pendingAutoPlayRef = useRef<boolean>(false);
+  const [audioPlayFailed, setAudioPlayFailed] = useState<boolean>(false);
 
   const pages = videoBook.pages || [];
   const currentPage = pages[activePageIdx] || pages[0];
 
   const activeTake = useMemo(() => {
     if (!takes.length) return null;
-    return takes.find((t) => t.id === selectedTakeId) || takes[0];
+    if (!selectedTakeId) return null;
+    return takes.find((t) => t.id === selectedTakeId) || null;
   }, [takes, selectedTakeId]);
 
-  // Trigger autoplay when an audiobook is freshly created or requested
+  // Only treat an audio take as playable WAV if it has a valid real voice URL and wasn't a synthetic beep fallback
+  const hasRealAudioTake = Boolean(
+    activeTake && activeTake.wavUrl && !activeTake.isSyntheticFallback && !audioPlayFailed
+  );
+
+  // Helper to safely start <audio> playback with volume unmuted
+  const startAudioElementPlayback = () => {
+    const el = audioRef.current;
+    if (!el || !hasRealAudioTake) return false;
+    el.muted = isMuted;
+    el.volume = 1.0;
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise
+        .then(() => {
+          pendingAutoPlayRef.current = false;
+          setIsPlaying(true);
+        })
+        .catch(() => {
+          // If browser blocks autoplay or audio fails, keep play button clearly ready or fall back to browser voice
+          pendingAutoPlayRef.current = false;
+          if (el.error) {
+            setAudioPlayFailed(true);
+            setIsPlaying(true);
+          } else {
+            setIsPlaying(false);
+          }
+        });
+    }
+    return true;
+  };
+
+  // Trigger autoplay when player modal opens via the "Reproducir" button
   useEffect(() => {
     if (autoPlayTrigger && autoPlayTrigger > 0) {
       setCurrentTime(0);
       lastSpokenPageRef.current = null;
-      setIsPlaying(true);
+      setAudioPlayFailed(false);
       onPageChange(0);
-      if (activeTake && audioRef.current) {
+      if (hasRealAudioTake && audioRef.current) {
         audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {});
+        pendingAutoPlayRef.current = true;
+        startAudioElementPlayback();
+      } else {
+        setIsPlaying(true);
       }
     }
   }, [autoPlayTrigger]);
@@ -378,24 +443,33 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     }
   }, [currentTime, pageTimings, activePageIdx, onPageChange]);
 
-  // Live Browser Speech Synthesis when playing without a recorded WAV take
+  // Live Browser Speech Synthesis fallback ONLY when no real Gemini WAV voice take is available
   useEffect(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
 
-    if (!isPlaying || isMuted) {
+    if (!isPlaying || isMuted || hasRealAudioTake) {
       window.speechSynthesis.cancel();
       lastSpokenPageRef.current = null;
       return;
     }
 
-    if (!activeTake && currentPage && lastSpokenPageRef.current !== activePageIdx) {
+    if (currentPage && lastSpokenPageRef.current !== activePageIdx) {
       lastSpokenPageRef.current = activePageIdx;
       try {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(
           `${currentPage.chapterTitle}. ${currentPage.pageText}`
         );
-        utterance.lang = 'es-ES';
+        const voices = window.speechSynthesis.getVoices();
+        const spanishVoice =
+          voices.find((v) => v.lang.toLowerCase().startsWith('es')) || null;
+        if (spanishVoice) {
+          utterance.voice = spanishVoice;
+          utterance.lang = spanishVoice.lang;
+        } else {
+          utterance.lang = 'es-ES';
+        }
+        utterance.volume = 1.0;
         utterance.pitch = selectedAvatar.gender === 'masculina' ? 0.88 : 1.06;
         utterance.rate = 0.98;
         window.speechSynthesis.speak(utterance);
@@ -403,7 +477,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
         // Ignore browser speech errors
       }
     }
-  }, [isPlaying, isMuted, activeTake, activePageIdx, currentPage, selectedAvatar.gender]);
+  }, [isPlaying, isMuted, hasRealAudioTake, activePageIdx, currentPage, selectedAvatar.gender]);
 
   useEffect(() => {
     return () => {
@@ -413,18 +487,39 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     };
   }, []);
 
+  // Reset playback ONLY when activeTake actually changes AFTER mount (prevents killing autoPlayTrigger on mount!)
   useEffect(() => {
-    setIsPlaying(false);
-    setCurrentTime(0);
+    const currentId = activeTake?.id || null;
+    if (prevTakeIdRef.current === undefined) {
+      prevTakeIdRef.current = currentId;
+      return;
+    }
+    if (prevTakeIdRef.current === currentId) return;
+    prevTakeIdRef.current = currentId;
+    setAudioPlayFailed(false);
     setAudioDuration(null);
+    setCurrentTime(0);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
+    if (isPlaying && currentId) {
+      pendingAutoPlayRef.current = true;
+    } else {
+      setIsPlaying(false);
+    }
   }, [activeTake?.id]);
 
+  // Keep <audio> mute state synced immediately
   useEffect(() => {
-    if (!isPlaying || activeTake) {
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+      audioRef.current.volume = isMuted ? 0 : 1.0;
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    if (!isPlaying || hasRealAudioTake) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       lastTickRef.current = null;
       return;
@@ -453,11 +548,12 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, activeTake, pageTimings.totalDuration]);
+  }, [isPlaying, hasRealAudioTake, pageTimings.totalDuration]);
 
   const togglePlay = () => {
-    if (activeTake && audioRef.current) {
+    if (hasRealAudioTake && audioRef.current) {
       if (isPlaying) {
+        pendingAutoPlayRef.current = false;
         audioRef.current.pause();
         setIsPlaying(false);
       } else {
@@ -466,8 +562,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
           setCurrentTime(0);
           onPageChange(0);
         }
-        audioRef.current.play().catch(() => {});
-        setIsPlaying(true);
+        startAudioElementPlayback();
       }
     } else {
       if (!isPlaying && currentTime >= pageTimings.totalDuration - 0.15) {
@@ -487,7 +582,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     if (targetTiming) {
       const targetTime = targetTiming.start + 0.05;
       setCurrentTime(targetTime);
-      if (activeTake && audioRef.current) {
+      if (hasRealAudioTake && audioRef.current) {
         audioRef.current.currentTime = targetTime;
       }
     }
@@ -547,6 +642,27 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     );
   }, [sentences.length, pageProgress, isPlaying, currentTime]);
 
+  // Dynamic Subtitles synced with current narration and live playback time
+  const dynamicSubtitles = useMemo(() => {
+    const narrationSource =
+      activeTake?.fullScript ||
+      videoBook.fullNarration ||
+      pages.map((p) => p.pageText).join(' ');
+    return generateDynamicSubtitles(narrationSource, pageTimings.totalDuration, pages);
+  }, [activeTake?.fullScript, videoBook.fullNarration, pages, pageTimings.totalDuration]);
+
+  const activeSubtitleCue = useMemo(
+    () => getActiveSubtitleCue(dynamicSubtitles, currentTime),
+    [dynamicSubtitles, currentTime]
+  );
+
+  const subtitleFontClassMap: Record<DynamicSubtitleSize, string> = {
+    sm: 'text-xs sm:text-sm',
+    md: 'text-sm sm:text-base',
+    lg: 'text-base sm:text-xl',
+    xl: 'text-lg sm:text-2xl',
+  };
+
   const formatSec = (sec: number) => {
     const s = Math.max(0, Math.floor(sec));
     const m = Math.floor(s / 60);
@@ -561,15 +677,26 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Hidden Audio Element when an AI Voiceover Take exists */}
-      {activeTake && (
+      {/* Hidden Audio Element when a real AI Voiceover Take exists */}
+      {hasRealAudioTake && activeTake && (
         <audio
+          key={activeTake.id}
           ref={audioRef}
           src={activeTake.wavUrl}
+          preload="auto"
           muted={isMuted}
           onLoadedMetadata={(e) => {
             const dur = e.currentTarget.duration;
             if (dur && Number.isFinite(dur)) setAudioDuration(dur);
+          }}
+          onCanPlay={() => {
+            if (pendingAutoPlayRef.current) {
+              startAudioElementPlayback();
+            }
+          }}
+          onError={() => {
+            pendingAutoPlayRef.current = false;
+            setAudioPlayFailed(true);
           }}
           onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
           onPlay={() => setIsPlaying(true)}
@@ -1308,6 +1435,36 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Live Dynamic Subtitles Overlay synced with current narration */}
+            {subtitleSettings.enabled && activeSubtitleCue && (
+              <div
+                className={`pointer-events-none absolute inset-x-4 z-30 flex justify-center transition-all duration-200 ${
+                  subtitleSettings.position === 'top'
+                    ? 'top-14'
+                    : subtitleSettings.position === 'center'
+                      ? 'top-1/2 -translate-y-1/2'
+                      : 'bottom-4'
+                }`}
+              >
+                <div
+                  className="max-w-[92%] rounded-xl px-4 py-2 text-center border border-amber-400/50 shadow-2xl backdrop-blur-md"
+                  style={{
+                    backgroundColor: `rgba(5, 7, 12, ${subtitleSettings.backgroundOpacity})`,
+                  }}
+                >
+                  <p
+                    className={`font-extrabold leading-snug tracking-wide ${subtitleFontClassMap[subtitleSettings.size]}`}
+                    style={{
+                      color: subtitleSettings.textColor,
+                      textShadow: '0 2px 6px rgba(0, 0, 0, 0.95), 0 0 2px rgba(0, 0, 0, 1)',
+                    }}
+                  >
+                    {activeSubtitleCue.text}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Right Page: Spoken Audiobook Text with High-Contrast Reading & Font Size Switcher */}
@@ -1648,6 +1805,23 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               {formatSec(currentTime)} / {formatSec(pageTimings.totalDuration)}
             </span>
 
+            {/* Live Audio Source Status Indicator */}
+            <span
+              className={`text-[11px] font-bold px-2.5 py-1 rounded border ${
+                isGeneratingAudio
+                  ? 'bg-amber-500/20 border-amber-400/50 text-amber-200'
+                  : hasRealAudioTake
+                    ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                    : 'bg-sky-500/20 border-sky-400/50 text-sky-200'
+              }`}
+            >
+              {isGeneratingAudio
+                ? 'Sintetizando voz IA...'
+                : hasRealAudioTake
+                  ? `Voz IA · ${activeTake?.voiceName || 'Estudio'}`
+                  : 'Voz en vivo activa'}
+            </span>
+
             {takes.length > 1 && (
               <select
                 value={activeTake?.id || ''}
@@ -1671,10 +1845,10 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => onExportMp4(videoExportSettings)}
+              onClick={() => onExportMp4(videoExportSettings, subtitleSettings)}
               disabled={isExportingMp4}
               className="px-3.5 py-1.5 rounded-lg border border-amber-400 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
-              title="Exportar y Descargar Video Audiolibro (.MP4)"
+              title="Exportar y Descargar Video Audiolibro (.MP4) con subtítulos dinámicos"
             >
               {isExportingMp4 ? (
                 <>
@@ -1740,6 +1914,135 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             >
               <FileText className="w-3.5 h-3.5 text-slate-400" />
               <span>Texto (.TXT)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Subtitles Studio Controls Bar (Size, Color, Position & .SRT Export) */}
+        <div className="px-5 py-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() =>
+                handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
+              }
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                subtitleSettings.enabled
+                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+              }`}
+            >
+              <Subtitles className="w-3.5 h-3.5" />
+              <span>
+                Subtítulos Dinámicos: {subtitleSettings.enabled ? 'Activos' : 'Ocultos'}
+              </span>
+            </button>
+
+            <span className="text-xs text-slate-500 font-mono tabular-nums">
+              {dynamicSubtitles.length} bloques sincronizados
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Subtitle Size Selector */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-slate-600 mr-1">Tamaño:</span>
+              {(
+                [
+                  { id: 'sm', label: 'Pequeño' },
+                  { id: 'md', label: 'Mediano' },
+                  { id: 'lg', label: 'Grande' },
+                  { id: 'xl', label: 'XL' },
+                ] as Array<{ id: DynamicSubtitleSize; label: string }>
+              ).map((sz) => (
+                <button
+                  key={sz.id}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
+                  className={`px-2 py-1 rounded-md text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                    subtitleSettings.size === sz.id
+                      ? 'bg-amber-600 text-white border-amber-700'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
+                  }`}
+                >
+                  {sz.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Subtitle Color Swatches + Custom Color Picker */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-600">Color:</span>
+              {SUBTITLE_COLOR_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
+                  title={preset.label}
+                  className={`w-5 h-5 rounded-full border-2 transition-transform cursor-pointer ${
+                    subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
+                      ? 'border-amber-600 scale-110 ring-2 ring-amber-300'
+                      : 'border-slate-300 hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+              <label
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer hover:border-amber-400"
+                title="Elegir color personalizado"
+              >
+                <input
+                  type="color"
+                  value={subtitleSettings.textColor}
+                  onChange={(e) =>
+                    handleUpdateSubtitleSettings({ textColor: e.target.value })
+                  }
+                  className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent p-0"
+                />
+                <span>Otro</span>
+              </label>
+            </div>
+
+            {/* Subtitle Position */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs font-semibold text-slate-600 mr-0.5">Posición:</span>
+              {(
+                [
+                  { id: 'bottom', label: 'Abajo' },
+                  { id: 'center', label: 'Centro' },
+                  { id: 'top', label: 'Arriba' },
+                ] as Array<{ id: DynamicSubtitlePosition; label: string }>
+              ).map((pos) => (
+                <button
+                  key={pos.id}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
+                  className={`px-2 py-1 rounded-md text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                    subtitleSettings.position === pos.id
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
+                  }`}
+                >
+                  {pos.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Download .SRT File */}
+            <button
+              type="button"
+              onClick={() =>
+                exportDynamicSubtitlesAsSrt(
+                  dynamicSubtitles,
+                  videoBook.bookTitle || 'audiolibro-subtitulos'
+                )
+              }
+              disabled={dynamicSubtitles.length === 0}
+              className="px-2.5 py-1 rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+              title="Descargar archivo de subtítulos sincronizados (.SRT)"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>.SRT</span>
             </button>
           </div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -10,13 +10,24 @@ import {
   Music,
   Loader2,
   Check,
+  Subtitles,
 } from 'lucide-react';
 import {
   drawCoverImage,
   renderSequenceToVideoUrl,
   downloadAudioAsMp3,
   getKenBurnsTransform,
+  DynamicSubtitleSettings,
+  DynamicSubtitleSize,
+  DynamicSubtitlePosition,
+  SUBTITLE_COLOR_PRESETS,
+  loadSavedSubtitleSettings,
+  saveSubtitleSettings,
+  generateDynamicSubtitles,
+  getActiveSubtitleCue,
+  drawDynamicSubtitleOnCanvas,
 } from '../utils/videoRenderer';
+import { exportDynamicSubtitlesAsSrt } from '../utils/scriptExporter';
 
 export interface SequenceShot {
   shotNumber: number;
@@ -48,6 +59,7 @@ interface CinemaSequenceCanvasProps {
   sequence: SequencePlan;
   audioUrl?: string | null;
   audioBase64?: string | null;
+  narrationText?: string | null;
   aspectRatio?: '16:9' | '9:16';
   activeShotIndex?: number;
   onActiveShotChange?: (index: number) => void;
@@ -71,6 +83,7 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
   sequence,
   audioUrl,
   audioBase64,
+  narrationText,
   aspectRatio = '16:9',
   onActiveShotChange,
   onMp4Created,
@@ -90,10 +103,36 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
   const [activeShotMotionLabel, setActiveShotMotionLabel] = useState<string>(
     'Ken Burns Dinámico'
   );
+  const [subtitleSettings, setSubtitleSettings] = useState<DynamicSubtitleSettings>(() =>
+    loadSavedSubtitleSettings()
+  );
+
+  const handleUpdateSubtitleSettings = (patch: Partial<DynamicSubtitleSettings>) => {
+    setSubtitleSettings((prev) => {
+      const next = { ...prev, ...patch };
+      saveSubtitleSettings(next);
+      return next;
+    });
+  };
 
   const shots = sequence.shots && sequence.shots.length > 0 ? sequence.shots : [];
   const totalDuration =
     shots.reduce((acc, s) => acc + (Number(s.durationSec) || 3.5), 0) || 14;
+
+  const activeNarrationSource = useMemo(() => {
+    return (
+      (narrationText && narrationText.trim()) ||
+      sequence.suggestedVoiceover ||
+      shots.map((s) => s.actionDescription || s.headlineText).join('. ') ||
+      sequence.emotionSummary ||
+      ''
+    );
+  }, [narrationText, sequence.suggestedVoiceover, sequence.emotionSummary, shots]);
+
+  const subtitleCues = useMemo(
+    () => generateDynamicSubtitles(activeNarrationSource, totalDuration),
+    [activeNarrationSource, totalDuration]
+  );
 
   const startTimeRef = useRef<number>(performance.now());
   const pausedAtRef = useRef<number>(0);
@@ -158,7 +197,9 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
         aspectRatio,
         '720p',
         (msg) => setExportProgressText(msg),
-        audioBase64
+        audioBase64,
+        subtitleSettings,
+        activeNarrationSource
       );
       setRecordedMp4Url(mp4Url);
       onMp4Created?.(mp4Url);
@@ -437,7 +478,7 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
         ctx.fillRect(0, 0, w, h);
       }
 
-      if (shot.headlineText) {
+      if (shot.headlineText && !(subtitleSettings.enabled && subtitleSettings.position === 'bottom')) {
         ctx.save();
         ctx.textAlign = 'center';
         ctx.font = `700 ${aspectRatio === '16:9' ? '26px' : '22px'} "Syne", sans-serif`;
@@ -458,6 +499,14 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
         ctx.restore();
       }
 
+      // Live Dynamic Subtitles based on active narration
+      if (subtitleSettings.enabled && subtitleCues.length > 0) {
+        const activeCue = getActiveSubtitleCue(subtitleCues, elapsed);
+        if (activeCue) {
+          drawDynamicSubtitleOnCanvas(ctx, activeCue.text, w, h, subtitleSettings);
+        }
+      }
+
       // Top Cinema HUD
       ctx.save();
       ctx.font = '500 11px "JetBrains Mono", monospace';
@@ -470,7 +519,7 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
       ctx.textAlign = 'right';
       ctx.fillStyle = 'rgba(245, 158, 11, 0.95)';
       ctx.fillText(
-        `PLANO 0${shot.shotNumber} · 🎬 ${kb.label.toUpperCase()} · ${shot.focalLens}`,
+        `PLANO 0${shot.shotNumber} · ${kb.label.toUpperCase()} · ${shot.focalLens}`,
         w - 20,
         Math.max(18, barHeight * 0.65)
       );
@@ -481,7 +530,16 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
 
     animId = requestAnimationFrame(renderFrame);
     return () => cancelAnimationFrame(animId);
-  }, [isPlaying, sequence, shots, totalDuration, aspectRatio, onActiveShotChange]);
+  }, [
+    isPlaying,
+    sequence,
+    shots,
+    totalDuration,
+    aspectRatio,
+    onActiveShotChange,
+    subtitleSettings,
+    subtitleCues,
+  ]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -606,6 +664,123 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
           )}
         </div>
       </div>
+
+      {/* Dynamic Subtitles Bar for Video Sequence (Size, Color, Position & .SRT) */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-white border border-slate-200 rounded-lg">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
+            }
+            className={`px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 border cursor-pointer whitespace-nowrap transition-colors ${
+              subtitleSettings.enabled
+                ? 'bg-amber-500 text-slate-950 border-amber-600'
+                : 'bg-slate-100 text-slate-700 border-slate-300'
+            }`}
+          >
+            <Subtitles className="w-3.5 h-3.5" />
+            <span>Subtítulos: {subtitleSettings.enabled ? 'ON' : 'OFF'}</span>
+          </button>
+          <span className="text-[11px] text-slate-500 font-mono">
+            {subtitleCues.length} líneas
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Size */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-semibold text-slate-600">Tamaño:</span>
+            {(
+              [
+                { id: 'sm', label: 'S' },
+                { id: 'md', label: 'M' },
+                { id: 'lg', label: 'G' },
+                { id: 'xl', label: 'XL' },
+              ] as Array<{ id: DynamicSubtitleSize; label: string }>
+            ).map((sz) => (
+              <button
+                key={sz.id}
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
+                className={`px-2 py-0.5 rounded text-xs font-bold border cursor-pointer ${
+                  subtitleSettings.size === sz.id
+                    ? 'bg-amber-600 text-white border-amber-700'
+                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
+                }`}
+              >
+                {sz.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Color */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-semibold text-slate-600">Color:</span>
+            {SUBTITLE_COLOR_PRESETS.map((preset) => (
+              <button
+                key={preset.hex}
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
+                title={preset.label}
+                className={`w-4 h-4 rounded-full border-2 cursor-pointer ${
+                  subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
+                    ? 'border-amber-600 scale-110'
+                    : 'border-slate-300'
+                }`}
+                style={{ backgroundColor: preset.hex }}
+              />
+            ))}
+            <input
+              type="color"
+              value={subtitleSettings.textColor}
+              onChange={(e) =>
+                handleUpdateSubtitleSettings({ textColor: e.target.value })
+              }
+              title="Color personalizado de subtítulos"
+              className="w-5 h-5 rounded cursor-pointer border border-slate-300 bg-transparent p-0"
+            />
+          </div>
+
+          {/* Position */}
+          <div className="flex items-center gap-1">
+            {(
+              [
+                { id: 'bottom', label: 'Abajo' },
+                { id: 'center', label: 'Centro' },
+                { id: 'top', label: 'Arriba' },
+              ] as Array<{ id: DynamicSubtitlePosition; label: string }>
+            ).map((pos) => (
+              <button
+                key={pos.id}
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
+                className={`px-2 py-0.5 rounded text-xs font-semibold border cursor-pointer ${
+                  subtitleSettings.position === pos.id
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 text-slate-700 border-slate-200'
+                }`}
+              >
+                {pos.label}
+              </button>
+            ))}
+          </div>
+
+          {/* SRT Export */}
+          <button
+            type="button"
+            onClick={() =>
+              exportDynamicSubtitlesAsSrt(subtitleCues, sequence.title || 'secuencia-video')
+            }
+            disabled={subtitleCues.length === 0}
+            className="px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          >
+            <Download className="w-3 h-3" />
+            <span>.SRT</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
+

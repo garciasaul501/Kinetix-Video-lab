@@ -74,6 +74,308 @@ export interface VideoBook {
   pages: VideoBookPage[];
 }
 
+export type DynamicSubtitleSize = 'sm' | 'md' | 'lg' | 'xl';
+export type DynamicSubtitlePosition = 'bottom' | 'center' | 'top';
+
+export interface DynamicSubtitleSettings {
+  enabled: boolean;
+  size: DynamicSubtitleSize;
+  textColor: string;
+  position: DynamicSubtitlePosition;
+  backgroundOpacity: number; // 0 to 0.95
+}
+
+export interface DynamicSubtitleCue {
+  index: number;
+  startSec: number;
+  endSec: number;
+  text: string;
+  chapterNumber?: number;
+}
+
+export const DEFAULT_SUBTITLE_SETTINGS: DynamicSubtitleSettings = {
+  enabled: true,
+  size: 'md',
+  textColor: '#FFFFFF',
+  position: 'bottom',
+  backgroundOpacity: 0.78,
+};
+
+export const SUBTITLE_COLOR_PRESETS: Array<{ label: string; hex: string }> = [
+  { label: 'Blanco Puro', hex: '#FFFFFF' },
+  { label: 'Oro 24K', hex: '#FBBF24' },
+  { label: 'Amarillo Cine', hex: '#FEF08A' },
+  { label: 'Cian Neón', hex: '#38BDF8' },
+  { label: 'Esmeralda', hex: '#34D399' },
+  { label: 'Coral Vivo', hex: '#FB7185' },
+];
+
+export const SUBTITLE_SETTINGS_STORAGE_KEY = 'kinetix_dynamic_subtitle_settings_v1';
+
+export function loadSavedSubtitleSettings(): DynamicSubtitleSettings {
+  try {
+    const raw = localStorage.getItem(SUBTITLE_SETTINGS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_SUBTITLE_SETTINGS.enabled,
+        size:
+          parsed.size === 'sm' || parsed.size === 'md' || parsed.size === 'lg' || parsed.size === 'xl'
+            ? parsed.size
+            : DEFAULT_SUBTITLE_SETTINGS.size,
+        textColor:
+          typeof parsed.textColor === 'string' && /^#[0-9A-Fa-f]{6}$/.test(parsed.textColor)
+            ? parsed.textColor
+            : DEFAULT_SUBTITLE_SETTINGS.textColor,
+        position:
+          parsed.position === 'bottom' || parsed.position === 'center' || parsed.position === 'top'
+            ? parsed.position
+            : DEFAULT_SUBTITLE_SETTINGS.position,
+        backgroundOpacity:
+          typeof parsed.backgroundOpacity === 'number'
+            ? Math.max(0, Math.min(0.95, parsed.backgroundOpacity))
+            : DEFAULT_SUBTITLE_SETTINGS.backgroundOpacity,
+      };
+    }
+  } catch {
+    // Ignore storage read errors
+  }
+  return { ...DEFAULT_SUBTITLE_SETTINGS };
+}
+
+export function saveSubtitleSettings(settings: DynamicSubtitleSettings): void {
+  try {
+    localStorage.setItem(SUBTITLE_SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Ignore storage write errors
+  }
+}
+
+/**
+ * Splits a narrative block into readable 5-9 word subtitle chunks for dynamic cinema captions.
+ */
+function splitTextIntoSubtitleChunks(rawText: string, maxWordsPerCue = 8): string[] {
+  const cleaned = String(rawText || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return [];
+
+  const sentences = cleaned
+    .split(/(?<=[.!?…])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  for (const sentence of sentences) {
+    const words = sentence.split(/\s+/).filter(Boolean);
+    if (words.length <= maxWordsPerCue) {
+      chunks.push(sentence);
+    } else {
+      let i = 0;
+      while (i < words.length) {
+        const remaining = words.length - i;
+        // Avoid orphan 1-2 word trailing chunks
+        const sliceLen =
+          remaining <= maxWordsPerCue
+            ? remaining
+            : remaining <= maxWordsPerCue + 2
+            ? Math.ceil(remaining / 2)
+            : maxWordsPerCue;
+        chunks.push(words.slice(i, i + sliceLen).join(' '));
+        i += sliceLen;
+      }
+    }
+  }
+  return chunks;
+}
+
+/**
+ * Generates timed dynamic subtitle cues directly from the current narration (and optional book pages).
+ */
+export function generateDynamicSubtitles(
+  narrationText: string,
+  totalDurationSec: number,
+  pages?: VideoBookPage[]
+): DynamicSubtitleCue[] {
+  const safeTotal = Math.max(1, Number(totalDurationSec) || 12);
+  const cues: DynamicSubtitleCue[] = [];
+  let cueIndex = 1;
+
+  if (pages && pages.length > 0) {
+    const rawPageDurs = pages.map((p) => Math.max(4, Number(p.durationSec) || 10));
+    const rawTotal = rawPageDurs.reduce((a, b) => a + b, 0) || 1;
+    const scale = safeTotal / rawTotal;
+    let cursor = 0;
+
+    for (let idx = 0; idx < pages.length; idx++) {
+      const p = pages[idx];
+      const pageDur = rawPageDurs[idx] * scale;
+      const pageText = (p.pageText || p.chapterTitle || '').trim();
+      const chunks = splitTextIntoSubtitleChunks(pageText, 8);
+
+      if (chunks.length === 0) {
+        cursor += pageDur;
+        continue;
+      }
+
+      const totalWeight = chunks.reduce((acc, c) => acc + Math.max(8, c.length), 0) || 1;
+      let localCursor = cursor;
+
+      chunks.forEach((chunk, ci) => {
+        const weight = Math.max(8, chunk.length);
+        const dur = (weight / totalWeight) * pageDur;
+        const startSec = localCursor;
+        const endSec = ci === chunks.length - 1 ? cursor + pageDur : localCursor + dur;
+        cues.push({
+          index: cueIndex++,
+          startSec,
+          endSec,
+          text: chunk,
+          chapterNumber: p.pageNumber,
+        });
+        localCursor = endSec;
+      });
+
+      cursor += pageDur;
+    }
+
+    if (cues.length > 0) {
+      return cues;
+    }
+  }
+
+  const chunks = splitTextIntoSubtitleChunks(narrationText, 8);
+  if (chunks.length === 0) return [];
+
+  const totalWeight = chunks.reduce((acc, c) => acc + Math.max(8, c.length), 0) || 1;
+  let cursor = 0;
+
+  chunks.forEach((chunk, idx) => {
+    const weight = Math.max(8, chunk.length);
+    const dur = (weight / totalWeight) * safeTotal;
+    const startSec = cursor;
+    const endSec = idx === chunks.length - 1 ? safeTotal : cursor + dur;
+    cues.push({
+      index: cueIndex++,
+      startSec,
+      endSec,
+      text: chunk,
+    });
+    cursor = endSec;
+  });
+
+  return cues;
+}
+
+export function getActiveSubtitleCue(
+  cues: DynamicSubtitleCue[],
+  currentTimeSec: number
+): DynamicSubtitleCue | null {
+  if (!cues || cues.length === 0) return null;
+  const t = Math.max(0, currentTimeSec);
+  for (let i = 0; i < cues.length; i++) {
+    if (t >= cues[i].startSec && t <= cues[i].endSec) {
+      return cues[i];
+    }
+  }
+  return t >= cues[cues.length - 1].startSec ? cues[cues.length - 1] : cues[0];
+}
+
+/**
+ * Burns dynamic subtitles onto any 2D video canvas (both live preview and exported MP4).
+ */
+export function drawDynamicSubtitleOnCanvas(
+  ctx: CanvasRenderingContext2D,
+  cueText: string,
+  width: number,
+  height: number,
+  settings: DynamicSubtitleSettings
+): void {
+  if (!settings.enabled || !cueText || !cueText.trim()) return;
+
+  const scaleFactor = Math.min(width, height) / 720;
+  const basePxMap: Record<DynamicSubtitleSize, number> = {
+    sm: 20,
+    md: 27,
+    lg: 34,
+    xl: 42,
+  };
+  const fontSize = Math.max(15, Math.round(basePxMap[settings.size] * Math.max(0.75, scaleFactor)));
+  const lineHeight = Math.round(fontSize * 1.32);
+  const maxBoxWidth = Math.round(width * 0.86);
+
+  ctx.save();
+  ctx.font = `800 ${fontSize}px "Plus Jakarta Sans", "Inter", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const lines = wrapCanvasLines(ctx, cueText.trim(), maxBoxWidth - 44, 3);
+  if (lines.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  let widestLine = 0;
+  for (const line of lines) {
+    widestLine = Math.max(widestLine, ctx.measureText(line).width);
+  }
+
+  const padX = Math.round(fontSize * 0.85);
+  const padY = Math.round(fontSize * 0.45);
+  const boxW = Math.min(maxBoxWidth, Math.ceil(widestLine + padX * 2));
+  const boxH = lines.length * lineHeight + padY * 2;
+  const boxX = Math.round((width - boxW) / 2);
+
+  let boxY: number;
+  if (settings.position === 'top') {
+    boxY = Math.round(height * 0.11);
+  } else if (settings.position === 'center') {
+    boxY = Math.round((height - boxH) / 2);
+  } else {
+    boxY = Math.round(height - boxH - Math.max(36, height * 0.08));
+  }
+
+  // Rounded backdrop box
+  const radius = Math.min(14, Math.round(boxH * 0.25));
+  const bgOpacity = Math.max(0, Math.min(0.95, settings.backgroundOpacity ?? 0.78));
+  if (bgOpacity > 0.02) {
+    ctx.fillStyle = `rgba(5, 7, 12, ${bgOpacity.toFixed(2)})`;
+    ctx.beginPath();
+    ctx.moveTo(boxX + radius, boxY);
+    ctx.lineTo(boxX + boxW - radius, boxY);
+    ctx.quadraticCurveTo(boxX + boxW, boxY, boxX + boxW, boxY + radius);
+    ctx.lineTo(boxX + boxW, boxY + boxH - radius);
+    ctx.quadraticCurveTo(boxX + boxW, boxY + boxH, boxX + boxW - radius, boxY + boxH);
+    ctx.lineTo(boxX + radius, boxY + boxH);
+    ctx.quadraticCurveTo(boxX, boxY + boxH, boxX, boxY + boxH - radius);
+    ctx.lineTo(boxX, boxY + radius);
+    ctx.quadraticCurveTo(boxX, boxY, boxX + radius, boxY);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  // Crisp subtitle text with dark stroke outline + shadow
+  const textColor = settings.textColor || '#FFFFFF';
+  lines.forEach((line, idx) => {
+    const ty = boxY + padY + lineHeight * (idx + 0.5);
+    ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.12));
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.lineJoin = 'round';
+    ctx.strokeText(line, width / 2, ty);
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = textColor;
+    ctx.fillText(line, width / 2, ty);
+  });
+
+  ctx.restore();
+}
+
 function hexToRgb(hex: string, fallback = [245, 158, 11]): [number, number, number] {
   const clean = (hex || '').replace('#', '').trim();
   if (clean.length === 6) {
@@ -310,6 +612,8 @@ export async function renderVideoBookToMp4Url(
     customAvatarUrl?: string;
     goldTypography?: boolean;
     exportSettings?: VideoExportSettings;
+    subtitleSettings?: DynamicSubtitleSettings;
+    narrationOverride?: string;
   }
 ): Promise<string> {
   const width = 1280;
@@ -317,6 +621,8 @@ export async function renderVideoBookToMp4Url(
   const pages = book.pages && book.pages.length > 0 ? book.pages : [];
   const mode: AudiobookVisualMode = visualOptions?.mode || 'avatar-and-scenes';
   const avatar: NarratorAvatarPreset = visualOptions?.avatar || NARRATOR_AVATAR_PRESETS[0];
+  const activeSubtitleSettings: DynamicSubtitleSettings =
+    visualOptions?.subtitleSettings || loadSavedSubtitleSettings();
 
   onProgress?.(8);
   const [loadedImages, customAvatarImg] = await Promise.all([
@@ -677,6 +983,25 @@ export async function renderVideoBookToMp4Url(
         });
       }
 
+      // Dynamic Subtitles Overlay burned directly into the exported VideoBook MP4
+      if (activeSubtitleSettings.enabled) {
+        const bookSubCues = generateDynamicSubtitles(
+          visualOptions?.narrationOverride || book.fullNarration || '',
+          renderDurationSec,
+          pages
+        );
+        const activeSubCue = getActiveSubtitleCue(bookSubCues, elapsed);
+        if (activeSubCue) {
+          drawDynamicSubtitleOnCanvas(
+            ctx,
+            activeSubCue.text,
+            width,
+            height,
+            activeSubtitleSettings
+          );
+        }
+      }
+
       requestAnimationFrame(drawBookFrame);
     };
 
@@ -722,13 +1047,16 @@ export async function renderSequenceToVideoUrl(
   aspectRatio: '16:9' | '9:16' = '16:9',
   resolution: '720p' | '1080p' = '720p',
   onProgress?: (msg: string) => void,
-  audioBase64?: string | null
+  audioBase64?: string | null,
+  subtitleSettings?: DynamicSubtitleSettings,
+  narrationOverride?: string
 ): Promise<string> {
   const is1080 = resolution === '1080p';
   const width = aspectRatio === '16:9' ? (is1080 ? 1280 : 960) : is1080 ? 720 : 540;
   const height = aspectRatio === '16:9' ? (is1080 ? 720 : 540) : is1080 ? 1280 : 960;
 
   const shots = sequence.shots && sequence.shots.length > 0 ? sequence.shots : [];
+  const activeSubSettings = subtitleSettings || loadSavedSubtitleSettings();
 
   onProgress?.('Cargando imágenes de los planos para composición de video…');
   const loadedImages = await Promise.all(
@@ -748,6 +1076,15 @@ export async function renderSequenceToVideoUrl(
     shots.reduce((acc, s) => acc + Math.max(3, Number(s.durationSec) || 4), 0)
   );
   const renderDurationSec = Math.max(8, Math.min(18, shots.length * 2.2));
+  const seqNarrationSource =
+    narrationOverride ||
+    sequence.suggestedVoiceover ||
+    shots.map((s) => s.actionDescription || s.headlineText).join('. ') ||
+    sequence.emotionSummary ||
+    '';
+  const seqSubtitleCues = activeSubSettings.enabled
+    ? generateDynamicSubtitles(seqNarrationSource, renderDurationSec)
+    : [];
   const stream = canvas.captureStream(30);
 
   const mimeType =
@@ -911,7 +1248,7 @@ export async function renderSequenceToVideoUrl(
       ctx.fillRect(0, 0, width, barHeight);
       ctx.fillRect(0, height - barHeight, width, barHeight);
 
-      if (shot.headlineText) {
+      if (shot.headlineText && !(activeSubSettings.enabled && activeSubSettings.position === 'bottom')) {
         ctx.save();
         ctx.textAlign = 'center';
         ctx.font = `700 ${aspectRatio === '16:9' ? '26px' : '22px'} "Syne", sans-serif`;
@@ -930,6 +1267,13 @@ export async function renderSequenceToVideoUrl(
           ctx.fillText(desc, width / 2, height - barHeight - 20);
         }
         ctx.restore();
+      }
+
+      if (activeSubSettings.enabled && seqSubtitleCues.length > 0) {
+        const activeSeqCue = getActiveSubtitleCue(seqSubtitleCues, elapsed);
+        if (activeSeqCue) {
+          drawDynamicSubtitleOnCanvas(ctx, activeSeqCue.text, width, height, activeSubSettings);
+        }
       }
 
       requestAnimationFrame(drawLoop);

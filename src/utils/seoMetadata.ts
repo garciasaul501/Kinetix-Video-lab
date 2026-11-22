@@ -1,5 +1,6 @@
 export type StudioModuleId =
   | 'videobook'
+  | 'ai-pdf-creator'
   | 'niche-gallery'
   | 'script'
   | 'pdf-director'
@@ -42,6 +43,27 @@ export const STUDIO_MODULES_SEO: Record<StudioModuleId, StudioModuleSeoEntry> = 
       'Videos y audiolibros sin límite de tiempo',
       'Biblioteca de 12+ PDFs listos y subida múltiple',
       '30 avatares reales + 1,200 escenas de nichos',
+    ],
+  },
+  'ai-pdf-creator': {
+    id: 'ai-pdf-creator',
+    shortLabel: 'Crear PDF con IA',
+    sectionBadge: 'SECCIÓN 02 · ESTUDIO INTEGRAL DE CREACIÓN DE PDF CON IA',
+    heading: 'Crear Documentos PDF con IA Adjuntando Todas las Herramientas del Estudio',
+    shortDescription:
+      'Redacta, adjunta archivos existentes, ilustra con IA o +1,200 fotos, narra con Voz IA 24kHz, exporta en PDF real y envía en 1 clic a Audiolibro, Storyboard o Video MP4.',
+    seoTitle: 'Crear PDF con IA y Estudio Editorial Integral | Kinetix Studio',
+    seoDescription:
+      'Crea libros, guías, reportes y manuales PDF completos con inteligencia artificial integrando dictado por voz, adjuntos PDF, ilustraciones IA y conversión a audiolibro y video MP4.',
+    keywords:
+      'crear PDF con IA, generador de ebooks PDF IA, convertir PDF a audiolibro y video, editor PDF inteligencia artificial, Kinetix Studio',
+    ogImage:
+      'https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=1200&h=630&q=85',
+    ogImageAlt: 'Estudio integral para crear documentos PDF profesionales con IA en Kinetix Studio',
+    highlights: [
+      'Generación completa con IA + adjunto de PDFs/TXT y dictado por voz',
+      'Ilustraciones IA, +1,200 escenas y Voz IA 24kHz integradas',
+      'Descarga PDF real + envío directo a Audiolibro, Storyboard y MP4',
     ],
   },
   'niche-gallery': {

@@ -22,6 +22,7 @@ export interface UnifiedActionToolbarProps {
   userTokenBalance: number;
   isGenerating?: boolean;
   isPlayingBg?: boolean;
+  canPlay?: boolean;
   language?: SupportedLanguage;
 }
 
@@ -37,6 +38,7 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
   userTokenBalance,
   isGenerating = false,
   isPlayingBg = false,
+  canPlay = true,
   language = 'es',
 }) => {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
@@ -62,11 +64,17 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
           className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
             isPlayingBg
               ? 'bg-amber-500 text-slate-950 border-amber-600'
-              : 'text-amber-900 hover:bg-amber-50 border-transparent hover:border-amber-200/80'
+              : canPlay
+                ? 'text-amber-900 hover:bg-amber-50 border-transparent hover:border-amber-200/80'
+                : 'text-slate-400 border-transparent hover:bg-slate-50'
           }`}
-          title="Abrir la pantalla de reproducción dentro de este botón"
+          title={
+            canPlay
+              ? 'Abrir la pantalla de reproducción de tu audiolibro creado'
+              : 'Primero crea un audiolibro desde PDF o carga uno en Mi Biblioteca'
+          }
         >
-          <Play className={`w-3.5 h-3.5 fill-current ${isPlayingBg ? 'text-slate-950' : 'text-amber-700'}`} />
+          <Play className={`w-3.5 h-3.5 fill-current ${isPlayingBg ? 'text-slate-950' : canPlay ? 'text-amber-700' : 'text-slate-400'}`} />
           <span>{t('actionReproducir', language)}</span>
         </button>
 

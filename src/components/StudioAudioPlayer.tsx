@@ -18,6 +18,7 @@ export interface VoiceoverTake {
   durationSec: number;
   peaks: number[];
   isFavorite?: boolean;
+  isSyntheticFallback?: boolean;
 }
 
 interface StudioAudioPlayerProps {

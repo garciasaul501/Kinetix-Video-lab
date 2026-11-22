@@ -1058,3 +1058,285 @@ export function exportVideoBookAsPdf(book: ExportableVideoBook): void {
   );
 }
 
+/**
+ * Formats seconds into standard SRT timecode (HH:MM:SS,mmm)
+ */
+function formatSrtTimecode(totalSec: number): string {
+  const safe = Math.max(0, totalSec);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = Math.floor(safe % 60);
+  const millis = Math.round((safe - Math.floor(safe)) * 1000);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(
+    seconds
+  ).padStart(2, '0')},${String(Math.min(999, millis)).padStart(3, '0')}`;
+}
+
+/**
+ * Exports timed dynamic subtitles as a standard .SRT caption file.
+ */
+export function exportDynamicSubtitlesAsSrt(
+  cues: Array<{ index: number; startSec: number; endSec: number; text: string }>,
+  title: string
+): void {
+  if (!cues || cues.length === 0) return;
+  const srtBody = cues
+    .map(
+      (cue, idx) =>
+        `${idx + 1}\n${formatSrtTimecode(cue.startSec)} --> ${formatSrtTimecode(
+          Math.max(cue.startSec + 0.4, cue.endSec)
+        )}\n${cue.text}\n`
+    )
+    .join('\n');
+
+  const blob = new Blob([srtBody], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${slugifyTitle(title || 'subtitulos-kinetix')}.srt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+export interface AiPdfSection {
+  sectionNumber: number;
+  heading: string;
+  body: string;
+  keyPoints: string[];
+  highlightQuote: string;
+  imagePrompt: string;
+  imageUrl?: string;
+}
+
+export interface AiGeneratedPdfDocument {
+  title: string;
+  subtitle: string;
+  author: string;
+  docType: string;
+  category: string;
+  language: string;
+  executiveSummary: string;
+  sections: AiPdfSection[];
+  fullNarration: string;
+  createdAt?: string;
+}
+
+/**
+ * Exports an AI-created PDF document as clean plain text (.txt).
+ */
+export function exportAiCreatedPdfAsTxt(doc: AiGeneratedPdfDocument): void {
+  const lines: string[] = [
+    '====================================================================',
+    `  ${doc.title.toUpperCase()}`,
+    `  ${doc.subtitle}`,
+    '====================================================================',
+    `Autor: ${doc.author} | Tipo: ${doc.docType} | Categoría: ${doc.category}`,
+    `Fecha: ${doc.createdAt || new Date().toLocaleDateString('es-ES')}`,
+    '',
+    'RESUMEN EJECUTIVO',
+    '--------------------------------------------------------------------',
+    doc.executiveSummary,
+    '',
+  ];
+
+  doc.sections.forEach((sec) => {
+    lines.push(`SECCIÓN ${String(sec.sectionNumber).padStart(2, '0')} — ${sec.heading.toUpperCase()}`);
+    lines.push('--------------------------------------------------------------------');
+    lines.push(sec.body);
+    if (sec.keyPoints && sec.keyPoints.length > 0) {
+      lines.push('');
+      lines.push('Puntos Clave:');
+      sec.keyPoints.forEach((kp) => lines.push(`  • ${kp}`));
+    }
+    if (sec.highlightQuote) {
+      lines.push('');
+      lines.push(`Cita Destacada: "${sec.highlightQuote}"`);
+    }
+    lines.push('');
+  });
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${slugifyTitle(doc.title || 'documento-ia')}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/**
+ * Generates and downloads a real multi-page formatted .PDF directly in-browser (no popups)
+ * for documents built in the "Crear PDF con IA" Studio.
+ */
+export function exportAiCreatedPdf(doc: AiGeneratedPdfDocument): void {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const marginX = 50;
+  const topStartY = 738;
+  const bottomLimitY = 64;
+
+  const pagesCommands: string[][] = [];
+  let currentCommands: string[] = [];
+  let cursorY = topStartY;
+
+  const startNewPage = (isFirst: boolean) => {
+    if (currentCommands.length > 0) {
+      pagesCommands.push(currentCommands);
+    }
+    currentCommands = [];
+    cursorY = topStartY;
+
+    if (isFirst) {
+      // Gold accent header bar
+      currentCommands.push('0.70 0.33 0.04 rg', `0 ${pageHeight - 10} ${pageWidth} 10 re f`);
+      currentCommands.push(
+        'BT',
+        '/F2 8.5 Tf',
+        '0.70 0.33 0.04 rg',
+        `${marginX} ${pageHeight - 30} Td`,
+        `${toPdfWinAnsiString(`KINETIX ESTUDIO IA  |  ${(doc.docType || 'DOCUMENTO PDF IA').toUpperCase()}`)} Tj`,
+        'ET'
+      );
+      currentCommands.push('0.88 0.85 0.78 RG', '0.8 w', `${marginX} ${pageHeight - 38} m ${pageWidth - marginX} ${pageHeight - 38} l S`);
+      cursorY = pageHeight - 62;
+    } else {
+      currentCommands.push('0.70 0.33 0.04 rg', `0 ${pageHeight - 4} ${pageWidth} 4 re f`);
+      currentCommands.push(
+        'BT',
+        '/F1 8 Tf',
+        '0.45 0.48 0.55 rg',
+        `${marginX} ${pageHeight - 24} Td`,
+        `${toPdfWinAnsiString(doc.title.slice(0, 72))} Tj`,
+        'ET'
+      );
+      cursorY = pageHeight - 48;
+    }
+  };
+
+  const ensureSpace = (neededPt: number) => {
+    if (cursorY - neededPt < bottomLimitY) {
+      startNewPage(false);
+    }
+  };
+
+  const addTextLine = (
+    text: string,
+    font: 'F1' | 'F2' | 'F3',
+    fontSize: number,
+    lineHeight: number,
+    rgb: [number, number, number] = [0.1, 0.12, 0.16],
+    indentX = 0
+  ) => {
+    ensureSpace(lineHeight);
+    const [r, g, b] = rgb;
+    currentCommands.push(
+      'BT',
+      `/${font} ${fontSize} Tf`,
+      `${r.toFixed(2)} ${g.toFixed(2)} ${b.toFixed(2)} rg`,
+      `${marginX + indentX} ${cursorY.toFixed(2)} Td`,
+      `${toPdfWinAnsiString(text)} Tj`,
+      'ET'
+    );
+    cursorY -= lineHeight;
+  };
+
+  const addWrappedParagraph = (
+    text: string,
+    font: 'F1' | 'F2' | 'F3',
+    fontSize: number,
+    lineHeight: number,
+    maxChars: number,
+    rgb: [number, number, number] = [0.15, 0.17, 0.22],
+    indentX = 0
+  ) => {
+    const wrapped = wrapTextByChars(text, maxChars);
+    for (const line of wrapped) {
+      addTextLine(line, font, fontSize, lineHeight, rgb, indentX);
+    }
+  };
+
+  startNewPage(true);
+
+  // Title & Metadata block
+  addWrappedParagraph(doc.title.toUpperCase(), 'F2', 17, 22, 52, [0.06, 0.08, 0.13]);
+  cursorY -= 2;
+  if (doc.subtitle) {
+    addWrappedParagraph(doc.subtitle, 'F1', 11, 15.5, 76, [0.32, 0.36, 0.44]);
+    cursorY -= 4;
+  }
+  addTextLine(
+    `AUTOR: ${doc.author || 'Kinetix Studio IA'}   |   CATEGORIA: ${doc.category || 'Editorial'}   |   SECCIONES: ${doc.sections.length}`,
+    'F3',
+    8.5,
+    14,
+    [0.55, 0.32, 0.05]
+  );
+  cursorY -= 8;
+
+  // Executive Summary Box
+  if (doc.executiveSummary) {
+    ensureSpace(70);
+    currentCommands.push(
+      '0.99 0.97 0.93 rg',
+      `${marginX} ${(cursorY - 6).toFixed(2)} ${pageWidth - marginX * 2} 18 re f`
+    );
+    addTextLine('RESUMEN EJECUTIVO', 'F2', 9.5, 16, [0.68, 0.32, 0.04], 6);
+    cursorY -= 2;
+    addWrappedParagraph(doc.executiveSummary, 'F1', 10, 14.5, 84, [0.14, 0.16, 0.22], 4);
+    cursorY -= 12;
+  }
+
+  // Document Sections
+  for (const sec of doc.sections) {
+    ensureSpace(110);
+    currentCommands.push(
+      '0.95 0.96 0.98 rg',
+      `${marginX} ${(cursorY - 4).toFixed(2)} ${pageWidth - marginX * 2} 18 re f`
+    );
+    addTextLine(
+      `${String(sec.sectionNumber).padStart(2, '0')} — ${sec.heading.toUpperCase()}`,
+      'F2',
+      10.5,
+      16,
+      [0.08, 0.1, 0.16],
+      6
+    );
+    cursorY -= 4;
+
+    addWrappedParagraph(sec.body, 'F1', 10, 14.8, 84, [0.12, 0.14, 0.19], 4);
+    cursorY -= 4;
+
+    if (sec.keyPoints && sec.keyPoints.length > 0) {
+      addTextLine('PUNTOS CLAVE:', 'F2', 8.5, 13, [0.55, 0.32, 0.05], 6);
+      for (const kp of sec.keyPoints) {
+        addWrappedParagraph(`- ${kp}`, 'F1', 9.5, 13.8, 80, [0.2, 0.23, 0.28], 12);
+      }
+      cursorY -= 3;
+    }
+
+    if (sec.highlightQuote) {
+      addWrappedParagraph(`"${sec.highlightQuote}"`, 'F2', 9.5, 13.5, 80, [0.70, 0.34, 0.04], 10);
+      cursorY -= 10;
+    } else {
+      cursorY -= 8;
+    }
+  }
+
+  if (currentCommands.length > 0) {
+    pagesCommands.push(currentCommands);
+  }
+
+  buildAndDownloadPdfDocument(
+    pagesCommands,
+    pageWidth,
+    pageHeight,
+    marginX,
+    `${slugifyTitle(doc.title || 'documento-ia')}.pdf`
+  );
+}
+
+

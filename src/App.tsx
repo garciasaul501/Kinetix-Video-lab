@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clapperboard,
   Mic,
@@ -37,6 +37,14 @@ import {
   LogIn,
   Zap,
   Play,
+  Pause,
+  Square,
+  Headphones,
+  Menu,
+  X,
+  Share2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { pcmBase64ToWav, createSyntheticToneWav } from './utils/audioWav';
 import {
@@ -705,9 +713,19 @@ export default function App() {
   const [bookMp4Progress, setBookMp4Progress] = useState<number>(0);
   const [exportedBookMp4Url, setExportedBookMp4Url] = useState<string | null>(null);
 
-  // --- VIDEOBOOK VIEW MODE: 'player' (Pantalla de Reproducir) or 'creator' (Creador PDF) ---
-  const [videobookViewMode, setVideobookViewMode] = useState<'player' | 'creator'>('creator');
+  // --- VIDEOBOOK VIEW MODE: 'creator' (Crear desde PDF), 'library' (Mi Biblioteca) ---
+  // La pantalla de reproducción se abre únicamente dentro del botón 'Reproducir' (Modal dedicado)
+  const [videobookViewMode, setVideobookViewMode] = useState<'creator' | 'library'>('creator');
+  const [isPlayerModalOpen, setIsPlayerModalOpen] = useState<boolean>(false);
   const [playerAutoPlayTrigger, setPlayerAutoPlayTrigger] = useState<number>(0);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
+  const [showSamplePdfGrid, setShowSamplePdfGrid] = useState<boolean>(false);
+
+  // --- BACKGROUND PLAYBACK STATE (Reproducir sin tener la pantalla del reproductor enfrente) ---
+  const [isBgPlaying, setIsBgPlaying] = useState<boolean>(false);
+  const [bgChapterIdx, setBgChapterIdx] = useState<number>(0);
+  const bgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bgPlayingRef = useRef<boolean>(false);
 
   // --- AUDIOBOOK MP3 / MP4 FOLDER VAULT STATE ---
   const [customFolders, setCustomFolders] = useState<string[]>(() =>
@@ -716,7 +734,6 @@ export default function App() {
   const [savedAudiobooks, setSavedAudiobooks] = useState<SavedAudiobookItem[]>(() =>
     loadSavedAudiobooksMeta(INITIAL_VIDEO_BOOK, pageImages, NARRATOR_AVATAR_PRESETS[0])
   );
-  const [showAudiobookFolder, setShowAudiobookFolder] = useState<boolean>(true);
   const [isSavingToFolder, setIsSavingToFolder] = useState<
     'MP3' | 'MP4' | 'MP4 + MP3' | null
   >(null);
@@ -863,6 +880,145 @@ ${textoPdf || '{{texto_pdf}}'}
   }. Utiliza un estilo visual ${visualStyleDesc || '[estilo visual deseado]'}.`;
 
   const activeTake = voiceTakes.find((t) => t.id === activeTakeId) || voiceTakes[0] || null;
+
+  const stopBackgroundPlayback = () => {
+    bgPlayingRef.current = false;
+    setIsBgPlaying(false);
+    if (bgAudioRef.current) {
+      bgAudioRef.current.pause();
+      bgAudioRef.current.currentTime = 0;
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  };
+
+  const speakBgChapter = (idx: number) => {
+    const pages = videoBook.pages || [];
+    if (!pages.length || idx >= pages.length) {
+      bgPlayingRef.current = false;
+      setIsBgPlaying(false);
+      setBgChapterIdx(0);
+      return;
+    }
+    setBgChapterIdx(idx);
+    setActiveBookPageIdx(idx);
+
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const page = pages[idx];
+      const utterance = new SpeechSynthesisUtterance(
+        `${page.chapterTitle}. ${page.pageText}`
+      );
+      utterance.lang =
+        currentLanguage === 'en'
+          ? 'en-US'
+          : currentLanguage === 'pt'
+            ? 'pt-BR'
+            : currentLanguage === 'fr'
+              ? 'fr-FR'
+              : 'es-ES';
+      utterance.pitch = selectedAvatar.gender === 'masculina' ? 0.88 : 1.06;
+      utterance.rate = 0.98;
+      utterance.onend = () => {
+        if (bgPlayingRef.current) {
+          speakBgChapter(idx + 1);
+        }
+      };
+      utterance.onerror = () => {
+        bgPlayingRef.current = false;
+        setIsBgPlaying(false);
+      };
+      window.speechSynthesis.speak(utterance);
+    } catch {
+      bgPlayingRef.current = false;
+      setIsBgPlaying(false);
+    }
+  };
+
+  const handleToggleBackgroundPlay = () => {
+    if (isBgPlaying) {
+      bgPlayingRef.current = false;
+      setIsBgPlaying(false);
+      if (bgAudioRef.current) {
+        bgAudioRef.current.pause();
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      return;
+    }
+
+    if (!videoBook.pages || videoBook.pages.length === 0) {
+      toast.info('Sin audiolibro listo', 'Primero crea o carga un PDF para reproducir.');
+      return;
+    }
+
+    // If full video player modal is already open, trigger its playback directly
+    if (isPlayerModalOpen) {
+      setPlayerAutoPlayTrigger((prev) => prev + 1);
+      return;
+    }
+
+    bgPlayingRef.current = true;
+    setIsBgPlaying(true);
+
+    if (activeTake && activeTake.wavUrl && bgAudioRef.current) {
+      bgAudioRef.current.play().catch(() => {
+        // Fallback to browser voice narration if audio element cannot play
+        speakBgChapter(bgChapterIdx);
+      });
+    } else {
+      const startIdx = bgChapterIdx < videoBook.pages.length ? bgChapterIdx : 0;
+      speakBgChapter(startIdx);
+    }
+
+    toast.success(
+      'Reproduciendo en segundo plano',
+      `"${videoBook.bookTitle || 'Audiolibro IA'}" suena sin abrir la pantalla del reproductor.`
+    );
+  };
+
+  // Opens the full VideoBookPlayer cleanly inside a modal triggered by the "Reproducir" button
+  const openPlayerModal = () => {
+    if (!videoBook.pages || videoBook.pages.length === 0) {
+      toast.info('Sin audiolibro listo', 'Primero crea o carga un PDF para reproducir.');
+      return;
+    }
+    stopBackgroundPlayback();
+    setIsPlayerModalOpen(true);
+    setPlayerAutoPlayTrigger((prev) => prev + 1);
+  };
+
+  // Automatically stop background audio when opening the Player Modal so audio never overlaps
+  useEffect(() => {
+    if (isPlayerModalOpen && isBgPlaying) {
+      stopBackgroundPlayback();
+    }
+  }, [isPlayerModalOpen, isBgPlaying]);
+
+  // Allow Escape key to close the Player Modal cleanly
+  useEffect(() => {
+    if (!isPlayerModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsPlayerModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlayerModalOpen]);
+
+  // Clean up background playback on unmount
+  useEffect(() => {
+    return () => {
+      bgPlayingRef.current = false;
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -1088,22 +1244,11 @@ ${textoPdf || '{{texto_pdf}}'}
         setNarrationScript(createdBook.fullNarration);
       }
 
-      // Automatically present reproduction screen and start playing
-      setVideobookViewMode('player');
-      setPlayerAutoPlayTrigger((prev) => prev + 1);
-
       toast.dismiss(toastId);
       toast.success(
         '¡Audiolibro Creado con Éxito!',
-        `Se han generado ${createdBook.pages.length} capítulos sincronizados. Mostrando pantalla de reproducción.`
+        `Se han generado ${createdBook.pages.length} capítulos sincronizados. Pulsa el botón "Reproducir" para abrir el reproductor.`
       );
-
-      setTimeout(() => {
-        const playerEl = document.getElementById('audiobook-master-player');
-        if (playerEl) {
-          playerEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
 
       if (autoIllustrateAndNarrate) {
         await Promise.all([
@@ -1216,7 +1361,7 @@ ${textoPdf || '{{texto_pdf}}'}
         saveAudiobooksMetaToStorage(next);
         return next;
       });
-      setShowAudiobookFolder(true);
+      setVideobookViewMode('library');
       toast.success(
         '¡Audiolibro Guardado!',
         `El proyecto se guardó exitosamente en la bóveda (${format}).`
@@ -2199,19 +2344,12 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   const handleToolbarReproducir = () => {
-    setActiveModule('videobook');
-    setVideobookViewMode('player');
-    setPlayerAutoPlayTrigger((prev) => prev + 1);
-    setTimeout(() => {
-      const player = document.getElementById('audiobook-master-player');
-      if (player) {
-        player.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 80);
+    openPlayerModal();
   };
 
   const handleToolbarCargar = () => {
     setActiveModule('videobook');
+    setVideobookViewMode('creator');
     setTimeout(() => {
       const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
       if (fileInput) {
@@ -2310,141 +2448,203 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-slate-900 transition-colors duration-300 selection:bg-amber-500 selection:text-black">
-      {/* Ultra-Modern Minimalist Glass Header */}
-      <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-xl border-b border-slate-200/80 transition-all">
-        <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen flex bg-white text-slate-900 transition-colors duration-300 selection:bg-amber-500 selection:text-black">
+      {/* Mobile Sidebar Backdrop */}
+      {mobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-slate-950/30 backdrop-blur-[2px] z-40 lg:hidden"
+          onClick={() => setMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* =====================================================================
+          ORGANIZED LEFT NAVIGATION SIDEBAR (260px Desktop / Slide-Over Mobile)
+         ===================================================================== */}
+      <aside
+        aria-label="Navegación del estudio"
+        className={`fixed lg:sticky top-0 left-0 z-50 lg:z-30 h-screen w-64 shrink-0 bg-white border-r border-amber-200/80 flex flex-col justify-between transition-transform duration-200 ease-out ${
+          mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        <div className="flex flex-col min-h-0 flex-1 overflow-y-auto">
+          {/* Sidebar Brand Header */}
+          <div className="h-16 px-5 border-b border-slate-200/80 flex items-center justify-between shrink-0">
             <FuturisticGoldLogo
-              size="sm"
+              size="xs"
               showWordmark={true}
               onClick={() => setIsViralLogoModalOpen(true)}
             />
-            {/* Botón Entrar Ahora Destacado en Header */}
             <button
               type="button"
-              onClick={() => {
-                const target =
-                  document.getElementById('studio-main-workspace') ||
-                  document.querySelector('main');
-                if (target) target.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs shadow-[0_0_18px_rgba(245,158,11,0.45)] hover:shadow-[0_0_26px_rgba(245,158,11,0.7)] transition-all cursor-pointer transform hover:scale-105"
-              title="Entrar ahora a la consola de creación"
+              onClick={() => setMobileSidebarOpen(false)}
+              className="lg:hidden p-1.5 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 cursor-pointer"
+              aria-label="Cerrar menú"
             >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>{t('enterNow', currentLanguage)}</span>
+              <X className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Ultra-Modern Segmented Navigation with Clear Readable Typography */}
-          <nav
-            aria-label="Módulos del estudio"
-            className="flex flex-wrap items-center gap-1.5 p-1.5 bg-slate-100 border border-slate-300 rounded-2xl"
-          >
+          {/* Primary Access CTA */}
+          <div className="px-4 pt-4 pb-2">
             <button
               type="button"
-              onClick={() => setActiveModule('videobook')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeModule === 'videobook'
-                  ? 'bg-slate-950 text-white shadow-sm'
-                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
+              onClick={() => {
+                setActiveModule('paypal-monetization');
+                setMobileSidebarOpen(false);
+              }}
+              className={`w-full px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                activeModule === 'paypal-monetization'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
               }`}
+              title="Empieza ahora antes de usar o ver - Botón Acceso"
             >
-              <BookOpen className="w-4 h-4" />
-              <span>{t('tabAudiobooks', currentLanguage)} ({savedAudiobooks.length})</span>
+              <Zap className="w-4 h-4 fill-current shrink-0" />
+              <span className="truncate">{t('subscribeNow', currentLanguage)}</span>
+            </button>
+          </div>
+
+          {/* Primary Studio Modules Navigation */}
+          <div className="px-3 py-3 space-y-1">
+            <div className="px-3 pb-1.5 text-[11px] font-semibold text-amber-800/80 tracking-wide">
+              Estudio Creativo
+            </div>
+
+            {[
+              {
+                id: 'videobook' as const,
+                label: t('tabAudiobooks', currentLanguage),
+                count: savedAudiobooks.length,
+                icon: BookOpen,
+              },
+              {
+                id: 'niche-gallery' as const,
+                label: t('tabGallery', currentLanguage),
+                icon: Layers,
+              },
+              {
+                id: 'script' as const,
+                label: t('tabScript', currentLanguage),
+                count: scriptHistory.length,
+                icon: History,
+              },
+              {
+                id: 'pdf-director' as const,
+                label: t('tabDirector', currentLanguage),
+                icon: Clapperboard,
+              },
+              {
+                id: 'narration' as const,
+                label: t('tabNarration', currentLanguage),
+                icon: Mic,
+              },
+              {
+                id: 'sequence' as const,
+                label: t('tabClips', currentLanguage),
+                icon: Film,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              const isActive = activeModule === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setActiveModule(item.id);
+                    setMobileSidebarOpen(false);
+                  }}
+                  className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-colors cursor-pointer ${
+                    isActive
+                      ? 'bg-amber-50 text-amber-900 border border-amber-300 font-bold'
+                      : 'text-slate-700 hover:text-amber-900 hover:bg-slate-50 border border-transparent'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        isActive ? 'text-amber-700' : 'text-slate-500'
+                      }`}
+                    />
+                    <span className="truncate">{item.label}</span>
+                  </span>
+                  {typeof item.count === 'number' && (
+                    <span
+                      className={`text-xs font-mono tabular-nums shrink-0 ${
+                        isActive ? 'text-amber-800 font-bold' : 'text-slate-500'
+                      }`}
+                    >
+                      {item.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Sidebar Footer: Tokens + Account Utilities */}
+        <div className="p-3 border-t border-slate-200/80 space-y-2 bg-slate-50/40 shrink-0">
+          {/* Token Balance Row */}
+          <div className="px-3 py-2.5 rounded-xl bg-white border border-amber-200/80 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[11px] font-medium text-slate-500">
+                {t('tokensBadge', currentLanguage)}
+              </div>
+              <div className="text-sm font-mono tabular-nums font-extrabold text-amber-800">
+                {userTokenBalance.toLocaleString()}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsBuyTokensModalOpen(true);
+                setMobileSidebarOpen(false);
+              }}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              + {t('buyTokens', currentLanguage)}
+            </button>
+          </div>
+
+          {/* Utility Actions */}
+          <div className="grid grid-cols-3 gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIsSocialShareModalOpen(true);
+                setMobileSidebarOpen(false);
+              }}
+              className="px-2 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-amber-900 hover:bg-white border border-transparent hover:border-slate-200 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              title="Compartir proyecto"
+            >
+              <Share2 className="w-3.5 h-3.5 text-amber-700" />
+              <span className="truncate max-w-full">Compartir</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveModule('niche-gallery')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeModule === 'niche-gallery'
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-indigo-950 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-200'
-              }`}
+              onClick={() => {
+                setIsSupportConciergeOpen(true);
+                setMobileSidebarOpen(false);
+              }}
+              className="px-2 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:text-amber-900 hover:bg-white border border-transparent hover:border-slate-200 flex flex-col items-center justify-center gap-1 transition-colors cursor-pointer"
+              title="Abrir Asistente de Soporte"
             >
-              <Layers className="w-4 h-4" />
-              <span>{t('tabGallery', currentLanguage)}</span>
+              <HelpCircle className="w-3.5 h-3.5 text-amber-700" />
+              <span className="truncate max-w-full">Ayuda</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveModule('script')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeModule === 'script'
-                  ? 'bg-slate-950 text-white shadow-sm'
-                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
-              }`}
-            >
-              <History className="w-4 h-4" />
-              <span>{t('tabScript', currentLanguage)} ({scriptHistory.length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveModule('pdf-director')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
-                activeModule === 'pdf-director'
-                  ? 'bg-slate-950 text-white shadow-sm'
-                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
-              }`}
-            >
-              {t('tabDirector', currentLanguage)}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveModule('narration')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
-                activeModule === 'narration'
-                  ? 'bg-slate-950 text-white shadow-sm'
-                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
-              }`}
-            >
-              {t('tabNarration', currentLanguage)}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveModule('sequence')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-extrabold transition-all cursor-pointer ${
-                activeModule === 'sequence'
-                  ? 'bg-slate-950 text-white shadow-sm'
-                  : 'text-slate-800 hover:text-slate-950 hover:bg-white'
-              }`}
-            >
-              {t('tabClips', currentLanguage)}
-            </button>
-          </nav>
-
-          {/* Futuristic Gold Model Toggle, Language Selector & Action CTAs */}
-          <div className="flex items-center gap-2">
-            {/* Multi-Language Selector Dropdown */}
-            <LanguageSelector
-              currentLanguage={currentLanguage}
-              onLanguageChange={handleLanguageChange}
-            />
-
-            {/* Asistente Oficial de Soporte y Onboarding (Concierge Customer Success) */}
-            <button
-              type="button"
-              onClick={() => setIsSupportConciergeOpen(true)}
-              className="px-3 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
-              title="Abrir Asistente Oficial de Soporte y Onboarding"
-            >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">{t('assistantSupport', currentLanguage)}</span>
-              <span className="md:hidden">Ayuda</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsAdminModalOpen(true)}
-              className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-2 border transition-all cursor-pointer ${
+              onClick={() => {
+                setIsAdminModalOpen(true);
+                setMobileSidebarOpen(false);
+              }}
+              className={`px-2 py-2 rounded-lg text-xs font-semibold flex flex-col items-center justify-center gap-1 border transition-colors cursor-pointer ${
                 adminSession
-                  ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border-emerald-300'
-                  : 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
+                  ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                  : 'text-slate-700 hover:text-amber-900 hover:bg-white border-transparent hover:border-slate-200'
               }`}
               title={
                 adminSession
@@ -2453,113 +2653,121 @@ ${textoPdf || '{{texto_pdf}}'}
               }
             >
               <ShieldCheck
-                className={`w-4 h-4 ${
-                  adminSession ? 'text-emerald-600' : 'text-slate-700'
+                className={`w-3.5 h-3.5 ${
+                  adminSession ? 'text-emerald-600' : 'text-amber-700'
                 }`}
               />
-              <span className="hidden xl:inline">
-                {adminSession ? `Admin · ${adminSession.user.email}` : 'Acceso Admin'}
-              </span>
-              <span className="xl:hidden">Admin</span>
-            </button>
-
-            {/* Buy Tokens Button (Exact Match to User Screenshot with 3D Coin & Lightning Bolt) */}
-            <button
-              type="button"
-              onClick={() => setIsBuyTokensModalOpen(true)}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-black text-white font-extrabold text-xs flex items-center gap-2 border border-amber-400/80 shadow-[0_0_15px_rgba(251,191,36,0.3)] hover:shadow-[0_0_20px_rgba(251,191,36,0.55)] transition-all cursor-pointer"
-              title="Comprar Tokens con PayPal (Monetización Segura sin exponer tu cuenta)"
-            >
-              <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 flex items-center justify-center text-slate-950 font-black text-[10px] shadow-xs">
-                ⚡
-              </span>
-              <span className="font-mono text-amber-300 font-black text-xs">
-                {userTokenBalance.toLocaleString()}
-              </span>
-              <span className="hidden sm:inline text-[11px] text-slate-300">{t('tokensBadge', currentLanguage)}</span>
-              <span className="px-1.5 py-0.5 rounded bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wide">
-                + {t('buyTokens', currentLanguage)}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setIsSocialShareModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_0_15px_rgba(245,158,11,0.35)] hover:shadow-[0_0_22px_rgba(245,158,11,0.5)] transition-all cursor-pointer"
-              title="Compartir directo a redes sociales y generar tráfico orgánico"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-              <span>{t('shareViral', currentLanguage)}</span>
-            </button>
-
-            {/* EMPIEZA AHORA ANTES DE USAR O VER · BOTÓN ACCESO */}
-            <button
-              type="button"
-              onClick={() => setActiveModule('paypal-monetization')}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-2 shadow-[0_4px_16px_rgba(245,158,11,0.4)] hover:shadow-[0_6px_22px_rgba(245,158,11,0.6)] transition-all transform hover:scale-105 cursor-pointer border border-amber-600/40"
-              title="Empieza ahora antes de usar o ver - Botón Acceso"
-            >
-              <Zap className="w-4 h-4 text-slate-950 fill-current animate-pulse" />
-              <span className="uppercase tracking-wide font-black">
-                {t('subscribeNow', currentLanguage)}
-              </span>
+              <span className="truncate max-w-full">Admin</span>
             </button>
           </div>
         </div>
-      </header>
+      </aside>
 
-      {/* Dynamic Module Description & SEO Context Bar — High Contrast & Crystal-Clear Readability */}
-      <div className="bg-white border-b border-slate-200/90 shadow-2xs">
-        <div className="max-w-[1440px] mx-auto px-6 py-3.5 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
-            <span className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-extrabold uppercase tracking-wider shrink-0">
-              {STUDIO_MODULE_SEO_MAP[activeModule]?.badgeText || 'Módulo Activo'}
-            </span>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-sm sm:text-base font-extrabold text-slate-950">
-                  {STUDIO_MODULE_SEO_MAP[activeModule]?.sectionHeading}
-                </h2>
-                <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
-                  SEO: {STUDIO_MODULE_SEO_MAP[activeModule]?.metaSection}
-                </span>
-              </div>
-              <p className="text-xs sm:text-sm font-medium text-slate-800 mt-0.5 leading-snug">
+      {/* =====================================================================
+          MAIN WORKSPACE COLUMN (Clean Sticky Top Bar + Focused Content Canvas)
+         ===================================================================== */}
+      <div className="flex-1 min-w-0 flex flex-col bg-white">
+        {/* Clean 1-Row Sticky Top Header Bar */}
+        <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 flex items-center justify-between gap-4">
+          {/* Left: Mobile Menu Button + Clean Breadcrumb Title */}
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="lg:hidden p-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 cursor-pointer shrink-0"
+              aria-label="Abrir menú de navegación"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 min-w-0 text-sm">
+              <span className="text-slate-500 font-medium hidden sm:inline whitespace-nowrap">
+                Estudio
+              </span>
+              <span className="text-slate-300 hidden sm:inline" aria-hidden="true">
+                /
+              </span>
+              <h1 className="font-display text-base sm:text-lg font-extrabold text-amber-800 truncate">
+                {STUDIO_MODULE_SEO_MAP[activeModule]?.shortLabel || 'Audiolibros IA'}
+              </h1>
+              <span className="hidden xl:inline text-slate-300 mx-1" aria-hidden="true">
+                ·
+              </span>
+              <span className="hidden xl:inline text-xs text-slate-500 truncate max-w-md">
                 {STUDIO_MODULE_SEO_MAP[activeModule]?.shortDescription}
-              </p>
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Botón Entrar Ahora en Banner de Módulo */}
-            <button
-              type="button"
-              onClick={() => {
-                const target = document.getElementById('studio-main-workspace');
-                if (target) target.scrollIntoView({ behavior: 'smooth' });
-              }}
-              className="px-3.5 py-1.5 rounded-xl bg-slate-950 hover:bg-amber-500 hover:text-slate-950 text-white font-black text-xs flex items-center gap-1.5 border border-amber-400/50 shadow-xs hover:shadow-md transition-all cursor-pointer"
-              title="Entrar ahora a este módulo de trabajo"
-            >
-              <span>{t('enterNow', currentLanguage)}</span>
-              <ArrowRight className="w-3.5 h-3.5 text-amber-400" />
-            </button>
+          {/* Right: Always-available Background Play Button + Language Selector */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <LanguageSelector
+              currentLanguage={currentLanguage}
+              onLanguageChange={handleLanguageChange}
+            />
 
-            <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-950 text-xs font-extrabold flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{t('unlimitedVideos', currentLanguage)}</span>
-            </span>
-            <span className="hidden xl:inline-flex px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-300 text-slate-900 text-xs font-bold">
-              {t('photosCount', currentLanguage)}
-            </span>
+            {/* Reproducir Button: houses the full reproduction screen inside a clean modal */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={openPlayerModal}
+                disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                  isPlayerModalOpen
+                    ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
+                    : !isGeneratingVideoBook && videoBook.pages.length > 0
+                      ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                }`}
+                title="Abrir la pantalla de reproducción de tu audiolibro"
+              >
+                {isGeneratingVideoBook ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Generando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Reproducir</span>
+                    {videoBook.pages.length > 0 && (
+                      <span className="font-mono tabular-nums text-[11px] opacity-80">
+                        ({videoBook.pages.length})
+                      </span>
+                    )}
+                  </>
+                )}
+              </button>
+
+              {isBgPlaying && (
+                <button
+                  type="button"
+                  onClick={stopBackgroundPlayback}
+                  className="p-2 rounded-lg bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 transition-colors cursor-pointer shrink-0"
+                  title="Detener audio en segundo plano"
+                  aria-label="Detener audio en segundo plano"
+                >
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
+        </header>
 
-      {/* Main Studio Workspace */}
-      <main id="studio-main-workspace" className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-8">
-        {/* Barra Unificada Siempre al Principio: Monetización Real + 6 Acciones Core Juntas */}
-        <div className="mb-8">
+        {/* Hidden Background Audio Element for Neural Voice Takes */}
+        <audio
+          ref={bgAudioRef}
+          src={activeTake?.wavUrl || undefined}
+          onEnded={() => {
+            bgPlayingRef.current = false;
+            setIsBgPlaying(false);
+          }}
+          className="hidden"
+        />
+
+        {/* Main Studio Workspace */}
+        <main id="studio-main-workspace" className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-8 py-6 space-y-6">
+          {/* Compact Single-Row Command Bar */}
           <UnifiedActionToolbar
             onCrear={handleToolbarCrear}
             onReproducir={handleToolbarReproducir}
@@ -2567,765 +2775,540 @@ ${textoPdf || '{{texto_pdf}}'}
             onEliminar={handleToolbarEliminar}
             onCompartir={handleToolbarCompartir}
             onConvertir={handleToolbarConvertir}
-            onMonetizar={() => setIsBuyTokensModalOpen(true)}
+            onMonetizar={() => setActiveModule('paypal-monetization')}
             onTestearPago={() => setIsBuyTokensModalOpen(true)}
             userTokenBalance={userTokenBalance}
             isGenerating={isGeneratingVideoBook || isExportingBookMp4}
+            isPlayingBg={isPlayerModalOpen}
             language={currentLanguage}
           />
-        </div>
 
-        {/* =====================================================================
-            MODULE: 1,200 FOTOS DE ESCENAS POR NICHOS (FULL GALLERY VIEW)
-           ===================================================================== */}
-        {activeModule === 'niche-gallery' && (
-          <div className="space-y-6">
-            <NicheSceneGalleryView
-              activeChapterNumber={
-                videoBook.pages[activeBookPageIdx]?.pageNumber || activeBookPageIdx + 1
-              }
-              activeChapterTitle={
-                videoBook.pages[activeBookPageIdx]?.chapterTitle || 'Capítulo Activo'
-              }
-              currentChapterImageUrl={pageImages[activeBookPageIdx]}
-              totalChapters={videoBook.pages.length}
-              onSelectPhotoForChapter={(photo: NicheScenePhoto) => {
-                setPageImages((prev) => ({ ...prev, [activeBookPageIdx]: photo.imageUrl }));
-                setExportedBookMp4Url(null);
-              }}
-              onAutoFillAllChaptersWithNiche={(niche?: 'Auto' | SceneNicheCategory) => {
-                const map: Record<number, string> = {};
-                if (!niche || niche === 'Auto') {
-                  const matched = matchBestScenesForBookPages(videoBook.pages);
-                  Object.entries(matched).forEach(([idxStr, ph]) => {
-                    map[Number(idxStr)] = ph.imageUrl;
-                  });
-                } else {
-                  const pool = NICHE_SCENE_LIBRARY_1200.filter((p) => p.niche === niche);
-                  videoBook.pages.forEach((_, idx) => {
-                    const chosen = pool[(idx * 7) % Math.max(1, pool.length)];
-                    if (chosen) map[idx] = chosen.imageUrl;
-                  });
+          {/* =====================================================================
+              MODULE: 1,200 FOTOS DE ESCENAS POR NICHOS (FULL GALLERY VIEW)
+             ===================================================================== */}
+          {activeModule === 'niche-gallery' && (
+            <div className="space-y-6">
+              <NicheSceneGalleryView
+                activeChapterNumber={
+                  videoBook.pages[activeBookPageIdx]?.pageNumber || activeBookPageIdx + 1
                 }
-                setPageImages((prev) => ({ ...prev, ...map }));
-                setExportedBookMp4Url(null);
-              }}
-              onUsePhotoInSequenceShot={(photo: NicheScenePhoto) => {
-                setSequencePlan((prev) => ({
-                  ...prev,
-                  shots: prev.shots.map((s, idx) =>
-                    idx === activeShotIndex
-                      ? {
-                          ...s,
-                          imageUrl: photo.imageUrl,
-                          headlineText: photo.title.toUpperCase(),
-                          actionDescription: `${photo.subNiche} · ${photo.title}`,
-                        }
-                      : s
-                  ),
-                }));
-                setActiveModule('sequence');
-              }}
-            />
-          </div>
-        )}
-
-        {/* =====================================================================
-            MODULE: SUSCRIPCIÓN Y ACCESO COMPLETO (PAYPAL)
-           ===================================================================== */}
-        {activeModule === 'paypal-monetization' && (
-          <PayPalMonetizationHub
-            currentVideoBook={videoBook}
-            currentCoverUrl={pageImages[0]}
-            currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
-            savedAudiobooks={savedAudiobooks}
-            onExportCurrentMp3={handleExportVideoBookMp3}
-            onExportCurrentMp4={handleExportVideoBookMp4}
-            externalCheckoutProduct={externalPayPalProduct}
-            onClearExternalCheckout={() => setExternalPayPalProduct(null)}
-            onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
-          />
-        )}
-
-        {/* =====================================================================
-            PRIMARY SIMPLE WORKFLOW: AUDIOLIBROS Y VIDEO-LIBROS IA DESDE PDF
-           ===================================================================== */}
-        {activeModule === 'videobook' && (
-          <div className="flex flex-col space-y-8">
-            {/* Overview of Studio Modules with Clear Short Descriptions for Easy Reading & SEO */}
-            <section
-              aria-label="Resumen de módulos del estudio"
-              className="order-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
-            >
-              {STUDIO_MODULE_LIST.slice(0, 4).map((mod) => {
-                const isCurrent = activeModule === mod.id;
-                return (
-                  <button
-                    key={mod.id}
-                    type="button"
-                    onClick={() => setActiveModule(mod.id)}
-                    className={`text-left p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                      isCurrent
-                        ? 'bg-indigo-50/70 border-indigo-400 shadow-xs'
-                        : 'bg-white hover:bg-slate-50 border-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-xs font-mono font-extrabold uppercase tracking-wider text-indigo-700 bg-indigo-100/80 px-2.5 py-0.5 rounded-md">
-                        {mod.shortLabel}
-                      </span>
-                      <span className="text-[11px] font-bold text-slate-700">
-                        {mod.badgeText}
-                      </span>
-                    </div>
-                    <p className="text-xs sm:text-sm font-semibold text-slate-900 leading-snug">
-                      {mod.shortDescription}
-                    </p>
-                  </button>
-                );
-              })}
-            </section>
-
-            {/* View Mode Switcher: Pantalla de Reproducir vs Creador desde PDF */}
-            <div className="order-2 flex flex-wrap items-center justify-between gap-4 bg-white border border-slate-300 p-4 rounded-2xl shadow-xs">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`p-2.5 rounded-xl border ${
-                    videobookViewMode === 'player'
-                      ? 'bg-amber-100 border-amber-300 text-amber-800'
-                      : 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                  }`}
-                >
-                  {videobookViewMode === 'player' ? (
-                    <Play className="w-5 h-5 fill-amber-600 text-amber-600" />
-                  ) : (
-                    <BookOpen className="w-5 h-5" />
-                  )}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-mono font-extrabold uppercase tracking-wider text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                      {videobookViewMode === 'player'
-                        ? 'Pantalla de Reproducir Activa'
-                        : 'Creador de Audiolibro desde PDF'}
-                    </span>
-                    {videoBook.pages.length > 0 && (
-                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        {videoBook.bookTitle || 'Audiolibro'} ({videoBook.pages.length} cap.)
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-base sm:text-lg font-black text-slate-950 mt-0.5">
-                    {videobookViewMode === 'player'
-                      ? 'Pantalla de Reproducción en Vivo con Avatar y Escenas'
-                      : 'Configurar y Convertir Documento PDF a Audiolibro'}
-                  </h2>
-                </div>
-              </div>
-
-              <div className="inline-flex p-1 bg-slate-100 border border-slate-300 rounded-xl shadow-inner">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVideobookViewMode('player');
-                    setPlayerAutoPlayTrigger((prev) => prev + 1);
-                    setTimeout(() => {
-                      const el = document.getElementById('audiobook-master-player');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 50);
-                  }}
-                  className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-                    videobookViewMode === 'player'
-                      ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 text-slate-950 shadow-md font-black transform scale-[1.02]'
-                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/60'
-                  }`}
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>Pantalla de Reproducir</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVideobookViewMode('creator');
-                    setTimeout(() => {
-                      const el = document.getElementById('audiobook-creation-stage');
-                      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }, 50);
-                  }}
-                  className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-extrabold flex items-center gap-2 transition-all cursor-pointer ${
-                    videobookViewMode === 'creator'
-                      ? 'bg-slate-950 text-white shadow-md font-black transform scale-[1.02]'
-                      : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200/60'
-                  }`}
-                >
-                  <BookOpen className="w-4 h-4" />
-                  <span>Creador / Subir PDF</span>
-                </button>
-              </div>
+                activeChapterTitle={
+                  videoBook.pages[activeBookPageIdx]?.chapterTitle || 'Capítulo Activo'
+                }
+                currentChapterImageUrl={pageImages[activeBookPageIdx]}
+                totalChapters={videoBook.pages.length}
+                onSelectPhotoForChapter={(photo: NicheScenePhoto) => {
+                  setPageImages((prev) => ({ ...prev, [activeBookPageIdx]: photo.imageUrl }));
+                  setExportedBookMp4Url(null);
+                }}
+                onAutoFillAllChaptersWithNiche={(niche?: 'Auto' | SceneNicheCategory) => {
+                  const map: Record<number, string> = {};
+                  if (!niche || niche === 'Auto') {
+                    const matched = matchBestScenesForBookPages(videoBook.pages);
+                    Object.entries(matched).forEach(([idxStr, ph]) => {
+                      map[Number(idxStr)] = ph.imageUrl;
+                    });
+                  } else {
+                    const pool = NICHE_SCENE_LIBRARY_1200.filter((p) => p.niche === niche);
+                    videoBook.pages.forEach((_, idx) => {
+                      const chosen = pool[(idx * 7) % Math.max(1, pool.length)];
+                      if (chosen) map[idx] = chosen.imageUrl;
+                    });
+                  }
+                  setPageImages((prev) => ({ ...prev, ...map }));
+                  setExportedBookMp4Url(null);
+                }}
+                onUsePhotoInSequenceShot={(photo: NicheScenePhoto) => {
+                  setSequencePlan((prev) => ({
+                    ...prev,
+                    shots: prev.shots.map((s, idx) =>
+                      idx === activeShotIndex
+                        ? {
+                            ...s,
+                            imageUrl: photo.imageUrl,
+                            headlineText: photo.title.toUpperCase(),
+                            actionDescription: `${photo.subNiche} · ${photo.title}`,
+                          }
+                        : s
+                    ),
+                  }));
+                  setActiveModule('sequence');
+                }}
+              />
             </div>
+          )}
 
-            {/* Simple 3-Step PDF to Spoken Audiobook Creator Card — Ultra-Modern Surface */}
-            <section
-              id="audiobook-creator-card"
-              className={`bg-white border border-slate-300 rounded-2xl p-6 sm:p-8 shadow-xs transition-all ${
-                videobookViewMode === 'creator' ? 'order-3' : 'order-5'
-              }`}
-            >
-              {videoBook.pages.length > 0 && videobookViewMode === 'creator' && (
-                <div className="mb-6 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-300 p-3.5 rounded-xl shadow-xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-lg bg-amber-500 text-slate-950 font-black">
-                      <Play className="w-4 h-4 fill-current" />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black text-slate-950">
-                        Audiolibro creado y listo para escuchar:{' '}
-                        <span className="text-amber-700 font-bold">
-                          "{videoBook.bookTitle || 'Audiolibro'}"
-                        </span>
-                      </p>
-                      <p className="text-[11px] text-slate-600">
-                        Contiene {videoBook.pages.length} capítulos sincronizados con narración y escenas Ken Burns.
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVideobookViewMode('player');
-                      setPlayerAutoPlayTrigger((prev) => prev + 1);
-                      setTimeout(() => {
-                        const player = document.getElementById('audiobook-master-player');
-                        if (player)
-                          player.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }, 80);
-                    }}
-                    className="text-xs px-3.5 py-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-white font-extrabold flex items-center gap-1.5 cursor-pointer shadow-xs transition-all"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current text-amber-400" />
-                    <span>Ver Pantalla de Reproducir Ahora</span>
-                  </button>
-                </div>
-              )}
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-6 mb-6">
+          {/* =====================================================================
+              MODULE: SUSCRIPCIÓN Y ACCESO COMPLETO (PAYPAL)
+             ===================================================================== */}
+          {activeModule === 'paypal-monetization' && (
+            <PayPalMonetizationHub
+              currentVideoBook={videoBook}
+              currentCoverUrl={pageImages[0]}
+              currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
+              savedAudiobooks={savedAudiobooks}
+              onExportCurrentMp3={handleExportVideoBookMp3}
+              onExportCurrentMp4={handleExportVideoBookMp4}
+              externalCheckoutProduct={externalPayPalProduct}
+              onClearExternalCheckout={() => setExternalPayPalProduct(null)}
+              onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+            />
+          )}
+
+          {/* =====================================================================
+              PRIMARY SIMPLE WORKFLOW: AUDIOLIBROS Y VIDEO-LIBROS IA DESDE PDF
+              Clean 3-Tab Focused Organization: Crear desde PDF | Reproducir video | Mi Biblioteca
+             ===================================================================== */}
+          {activeModule === 'videobook' && (
+            <div className="space-y-6">
+              {/* Clean Segmented Sub-Navigation for Audiolibro IA */}
+              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
                 <div>
-                  <span className="text-xs font-mono font-extrabold uppercase tracking-widest text-indigo-700">
-                    AUDIOLIBROS IA EN VIDEO Y AUDIO · SIN LÍMITE DE TIEMPO
-                  </span>
-                  <h1 className="font-display text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight mt-1">
-                    Convierte cualquier PDF en un Audiolibro Hablado con IA
-                  </h1>
-                  <p className="text-sm sm:text-base font-medium text-slate-800 mt-1">
-                    Sube uno o varios archivos PDF, elige entre los 12 documentos completos por nicho y genera videos MP4 o audios MP3 sin límite de duración.
+                  <h2 className="font-display text-xl sm:text-2xl font-extrabold text-amber-800 tracking-tight">
+                    Audiolibro IA desde PDF
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
+                    Sube tu PDF, configura la voz y reproduce tu video audiolibro al instante sin límite de tiempo.
                   </p>
                 </div>
 
-                {/* Quick Actions: Reproducir video + Entrar Ahora + 1,200 Photos + Folder Toggle + Subscribe */}
-                <div className="flex flex-wrap items-center gap-2.5">
+                {/* 2 Focused Workspace Tabs (La pantalla de reproducción vive dentro del botón Reproducir) */}
+                <div className="inline-flex items-center p-1 bg-slate-100 border border-slate-200 rounded-xl">
                   <button
                     type="button"
-                    onClick={() => {
-                      setVideobookViewMode('player');
-                      setPlayerAutoPlayTrigger((prev) => prev + 1);
-                      setTimeout(() => {
-                        const player = document.getElementById('audiobook-master-player');
-                        if (player) {
-                          player.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                      }, 60);
-                    }}
-                    disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
-                    className={`text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-2 font-black transition-all cursor-pointer ${
-                      !isGeneratingVideoBook && videoBook.pages.length > 0
-                        ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.4)] transform hover:scale-105 ring-2 ring-amber-400'
-                        : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                    onClick={() => setVideobookViewMode('creator')}
+                    className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+                      videobookViewMode === 'creator'
+                        ? 'bg-white text-amber-900 shadow-2xs border border-amber-200'
+                        : 'text-slate-600 hover:text-slate-950'
                     }`}
                   >
-                    {isGeneratingVideoBook ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
-                        <span>Generando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play
-                          className={`w-4 h-4 ${
-                            videoBook.pages.length > 0 ? 'fill-current text-slate-950' : 'text-slate-400'
-                          }`}
-                        />
-                        <span>Reproducir video</span>
-                      </>
-                    )}
+                    <BookOpen className="w-4 h-4" />
+                    <span>1. Crear desde PDF</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      const stage = document.getElementById('audiobook-creation-stage');
-                      if (stage) stage.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-extrabold flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <LogIn className="w-4 h-4" />
-                    <span>Entrar Ahora a Crear</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveModule('niche-gallery')}
-                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-950 border border-indigo-300 flex items-center gap-1.5 font-extrabold transition-all cursor-pointer"
-                  >
-                    <Layers className="w-4 h-4 text-indigo-700" />
-                    <span>Ver las 1,200 Fotos de Nichos</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowAudiobookFolder(!showAudiobookFolder)}
-                    className={`text-xs sm:text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 font-extrabold border transition-all cursor-pointer ${
-                      showAudiobookFolder
-                        ? 'bg-slate-950 text-white border-slate-950'
-                        : 'bg-white text-slate-900 border-slate-300 hover:bg-slate-100'
+                    onClick={() => setVideobookViewMode('library')}
+                    className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap ${
+                      videobookViewMode === 'library'
+                        ? 'bg-white text-amber-900 shadow-2xs border border-amber-200'
+                        : 'text-slate-600 hover:text-slate-950'
                     }`}
                   >
                     <FolderOpen className="w-4 h-4" />
-                    <span>
-                      {showAudiobookFolder
-                        ? `Mi Biblioteca (${savedAudiobooks.length})`
-                        : `Abrir Biblioteca (${savedAudiobooks.length})`}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveModule('paypal-monetization')}
-                    className="text-xs sm:text-sm px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 font-extrabold shadow-xs transition-all cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Suscríbete ahora</span>
+                    <span>2. Mi Biblioteca ({savedAudiobooks.length})</span>
                   </button>
                 </div>
               </div>
 
-              {/* 12 Ready-to-Use Niche PDF Documents Selector Bar */}
-              <div className="mb-6 bg-slate-50 border border-slate-300 rounded-2xl p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-indigo-700" />
-                    <span className="text-xs sm:text-sm font-extrabold text-slate-950 uppercase tracking-wider">
-                      Biblioteca de 12 Documentos PDF Completos por Nicho (Haz clic para cargar o descargar)
-                    </span>
-                  </div>
-                  <span className="text-xs font-bold text-slate-700">
-                    Documento activo: <strong className="text-indigo-700">{uploadedPdfName}</strong>
-                  </span>
-                </div>
+              {/* =================================================================
+                  TAB 1: CREAR DESDE PDF (Clean 2-Column Guided Workspace)
+                 ================================================================= */}
+              {videobookViewMode === 'creator' && (
+                <section
+                  id="audiobook-creator-card"
+                  className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6"
+                >
+                  {/* Clean 2-Column Split: Left (Content & PDF) | Right (Settings & Produce) */}
+                  <div
+                    id="audiobook-creation-stage"
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start"
+                  >
+                    {/* LEFT COLUMN (7 cols): Upload PDF + Quick Niche Template + Editable Text */}
+                    <div className="lg:col-span-7 space-y-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-base font-bold text-amber-800">
+                          01. Sube tu documento PDF o escribe el texto
+                        </h3>
+                        <span className="text-xs font-mono tabular-nums text-slate-500">
+                          {pdfWordCount} palabras
+                        </span>
+                      </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                  {SAMPLE_PDF_DOCUMENTS.map((doc) => {
-                    const isSelected = uploadedPdfName === doc.filename;
-                    return (
-                      <div
-                        key={doc.filename}
-                        className={`rounded-xl p-3 border transition-all flex flex-col justify-between gap-2 ${
-                          isSelected
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
-                            : 'bg-white hover:bg-slate-100 text-slate-900 border-slate-300'
-                        }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTextoPdf(doc.content);
-                            setUploadedPdfName(doc.filename);
-                          }}
-                          className="text-left cursor-pointer space-y-1"
-                        >
-                          <div className="flex items-center justify-between gap-1">
-                            <span
-                              className={`text-[11px] font-mono font-extrabold px-2 py-0.5 rounded ${
-                                isSelected
-                                  ? 'bg-white/20 text-white'
-                                  : 'bg-indigo-50 text-indigo-900 border border-indigo-200'
-                              }`}
-                            >
-                              {doc.niche}
-                            </span>
-                            <span
-                              className={`text-[11px] font-mono font-bold ${
-                                isSelected ? 'text-indigo-100' : 'text-slate-600'
-                              }`}
-                            >
-                              {doc.pagesCount} págs
-                            </span>
+                      {/* PDF Upload Bar */}
+                      <div className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50/70 border border-slate-200">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-lg bg-white border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+                            <FileText className="w-5 h-5" />
                           </div>
-                          <div
-                            className={`text-xs sm:text-sm font-extrabold leading-snug ${
-                              isSelected ? 'text-white' : 'text-slate-950'
-                            }`}
-                          >
-                            {doc.label}
+                          <div className="min-w-0">
+                            <div className="text-sm font-bold text-slate-950 truncate">
+                              {isExtractingPdf
+                                ? 'Extrayendo texto del PDF...'
+                                : uploadedPdfName || 'Selecciona uno o varios archivos PDF'}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              Compatible con .PDF, .TXT y .MD sin límite de extensión
+                            </div>
                           </div>
-                        </button>
+                        </div>
 
-                        <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-current/10">
+                        <label className="px-4 py-2.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-white font-bold text-xs flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap shrink-0">
+                          {isExtractingPdf ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <FileUp className="w-4 h-4" />
+                          )}
+                          <span>Subir PDF(s)</span>
+                          <input
+                            type="file"
+                            multiple
+                            accept=".pdf,.txt,.md,application/pdf,text/plain"
+                            onChange={handlePdfFileUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+
+                      {/* Compact Niche PDF Template Picker (Collapsible 12-doc browser) */}
+                      <div className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="text-xs font-semibold text-slate-700">
+                            O elige una plantilla lista (12 documentos por nicho):
+                          </label>
                           <button
                             type="button"
-                            onClick={() => {
-                              setTextoPdf(doc.content);
-                              setUploadedPdfName(doc.filename);
-                            }}
-                            className={`text-xs font-extrabold px-2.5 py-1 rounded-lg cursor-pointer ${
-                              isSelected
-                                ? 'bg-white text-indigo-950'
-                                : 'bg-slate-900 text-white hover:bg-indigo-600'
-                            }`}
+                            onClick={() => setShowSamplePdfGrid((prev) => !prev)}
+                            className="text-xs font-bold text-amber-800 hover:text-amber-950 flex items-center gap-1 cursor-pointer"
                           >
-                            {isSelected ? '✓ Cargado' : 'Usar este PDF'}
+                            <span>
+                              {showSamplePdfGrid ? 'Ocultar catálogo' : 'Explorar las 12 plantillas'}
+                            </span>
+                            {showSamplePdfGrid ? (
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            )}
                           </button>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={uploadedPdfName || SAMPLE_PDF_DOCUMENTS[0].filename}
+                            onChange={(e) => {
+                              const found = SAMPLE_PDF_DOCUMENTS.find(
+                                (d) => d.filename === e.target.value
+                              );
+                              if (found) {
+                                setTextoPdf(found.content);
+                                setUploadedPdfName(found.filename);
+                              }
+                            }}
+                            className="flex-1 rounded-lg bg-white border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:border-amber-500"
+                          >
+                            {SAMPLE_PDF_DOCUMENTS.map((doc) => (
+                              <option key={doc.filename} value={doc.filename}>
+                                {doc.niche} — {doc.label} ({doc.pagesCount} págs)
+                              </option>
+                            ))}
+                          </select>
+
                           <button
                             type="button"
                             onClick={() => {
-                              const blob = new Blob([doc.content], {
+                              const activeDoc =
+                                SAMPLE_PDF_DOCUMENTS.find((d) => d.filename === uploadedPdfName) ||
+                                SAMPLE_PDF_DOCUMENTS[0];
+                              const blob = new Blob([activeDoc.content], {
                                 type: 'text/plain;charset=utf-8',
                               });
                               const url = URL.createObjectURL(blob);
-                              triggerDownloadUrl(url, doc.filename.replace(/\.pdf$/i, '.txt'));
+                              triggerDownloadUrl(url, activeDoc.filename.replace(/\.pdf$/i, '.txt'));
                               setTimeout(() => URL.revokeObjectURL(url), 5000);
                             }}
-                            className={`text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1 cursor-pointer ${
-                              isSelected
-                                ? 'bg-indigo-700 text-white hover:bg-indigo-800'
-                                : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                            }`}
+                            className="px-3 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                             title="Descargar texto del documento"
                           >
-                            <Download className="w-3 h-3" />
+                            <Download className="w-3.5 h-3.5" />
                             <span>Bajar</span>
                           </button>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
 
-              {/* 3 Simple Columns: Paso 1 (PDF) | Paso 2 (Avatar, Duración Sin Límite y Escenas) | Paso 3 (Crear y Suscribirse) */}
-              <div id="audiobook-creation-stage" className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-                {/* PASO 1: Subir PDF o Texto (Soporta múltiples PDFs) */}
-                <div className="lg:col-span-5 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider">
-                        01 · Subir 1 o Varios PDFs / Texto
-                      </span>
-                      <span className="text-xs font-mono font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-md border border-indigo-200">
-                        {pdfWordCount} palabras
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3 p-3.5 rounded-xl bg-white border border-slate-300 shadow-2xs">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-center shrink-0">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div className="truncate">
-                          <div className="text-sm font-extrabold text-slate-950 truncate">
-                            {isExtractingPdf
-                              ? 'Extrayendo texto del PDF...'
-                              : uploadedPdfName || 'Selecciona uno o varios PDFs'}
+                        {showSamplePdfGrid && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 max-h-64 overflow-y-auto pr-1">
+                            {SAMPLE_PDF_DOCUMENTS.map((doc) => {
+                              const isSelected = uploadedPdfName === doc.filename;
+                              return (
+                                <button
+                                  key={doc.filename}
+                                  type="button"
+                                  onClick={() => {
+                                    setTextoPdf(doc.content);
+                                    setUploadedPdfName(doc.filename);
+                                    setShowSamplePdfGrid(false);
+                                  }}
+                                  className={`text-left p-3 rounded-xl border transition-colors cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-amber-50 border-amber-400 text-amber-950'
+                                      : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                                    <span className="font-semibold text-amber-800">{doc.niche}</span>
+                                    <span className="font-mono tabular-nums">{doc.pagesCount} págs</span>
+                                  </div>
+                                  <div className="text-xs font-bold text-slate-900 mt-0.5 truncate">
+                                    {doc.label}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="text-xs font-semibold text-slate-700">
-                            Soporta múltiples archivos .PDF, .TXT y .MD sin límite
-                          </div>
-                        </div>
-                      </div>
-
-                      <label className="px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-indigo-600 text-white font-extrabold text-xs sm:text-sm flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer shrink-0">
-                        {isExtractingPdf ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <FileUp className="w-4 h-4" />
                         )}
-                        <span>Subir PDF(s)</span>
-                        <input
-                          type="file"
-                          multiple
-                          accept=".pdf,.txt,.md,application/pdf,text/plain"
-                          onChange={handlePdfFileUpload}
-                          className="hidden"
+                      </div>
+
+                      {/* Text Editor + Voice Dictation */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <label className="text-xs font-semibold text-slate-700">
+                            Contenido del libro (edita, pega o dicta por voz):
+                          </label>
+                          <VoiceDictationButton
+                            currentValue={textoPdf}
+                            onChangeText={setTextoPdf}
+                            variant="light"
+                            label="Dictar por voz"
+                          />
+                        </div>
+
+                        <textarea
+                          rows={7}
+                          value={textoPdf}
+                          onChange={(e) => setTextoPdf(e.target.value)}
+                          placeholder="Aquí aparece el contenido extraído de tu PDF. También puedes escribir, pegar o dictar cualquier texto..."
+                          className="w-full rounded-xl bg-white border border-slate-300 p-4 text-sm text-slate-900 leading-relaxed focus:outline-none focus:border-amber-500"
                         />
-                      </label>
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between pt-0.5">
-                      <span className="text-xs font-bold text-slate-800">
-                        Escribe, pega o dicta tus ideas con el micrófono:
-                      </span>
-                      <VoiceDictationButton
-                        currentValue={textoPdf}
-                        onChangeText={setTextoPdf}
-                        variant="light"
-                        label="Dictar por voz"
-                      />
-                    </div>
+                    {/* RIGHT COLUMN (5 cols): Voice, Chapters, Style & Primary Actions */}
+                    <div className="lg:col-span-5 lg:border-l lg:border-slate-200 lg:pl-8 space-y-5">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-bold text-amber-800">
+                          02. Voz, formato y producción
+                        </h3>
+                        <span className="text-xs font-mono tabular-nums text-slate-500">
+                          30 voces IA
+                        </span>
+                      </div>
 
-                    <textarea
-                      rows={4}
-                      value={textoPdf}
-                      onChange={(e) => setTextoPdf(e.target.value)}
-                      placeholder="Aquí aparece el contenido extraído de tu PDF (también puedes escribir, pegar o dictar con el micrófono cualquier texto sin límite de extensión)..."
-                      className="w-full rounded-xl bg-white border border-slate-300 p-3.5 text-sm font-medium text-slate-950 leading-relaxed focus:outline-none focus:border-indigo-600"
-                    />
-                  </div>
-                </div>
+                      {/* Narrator Avatar Selector */}
+                      <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/70 border border-slate-200">
+                        <img
+                          src={
+                            customAvatarUrl ||
+                            selectedAvatar.customPhotoUrl ||
+                            selectedAvatar.realPhotoUrl
+                          }
+                          alt={selectedAvatar.name}
+                          referrerPolicy="no-referrer"
+                          className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0 bg-slate-900"
+                        />
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <label className="text-xs font-semibold text-slate-700 block truncate">
+                            Narrador · {selectedAvatar.accent}
+                          </label>
+                          <select
+                            value={selectedAvatar.id}
+                            onChange={(e) => {
+                              const found = NARRATOR_AVATAR_PRESETS.find(
+                                (a) => a.id === e.target.value
+                              );
+                              if (found) {
+                                setSelectedAvatar(found);
+                                setCustomAvatarUrl(undefined);
+                                setVoiceName(found.voiceName);
+                                setVoiceGender(found.gender);
+                              }
+                            }}
+                            className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-2 text-xs sm:text-sm font-semibold text-slate-950 focus:outline-none focus:border-amber-500"
+                          >
+                            {NARRATOR_AVATAR_PRESETS.map((av) => (
+                              <option key={av.id} value={av.id}>
+                                #{String(av.number).padStart(2, '0')} {av.name} ({av.accent.replace('Español ', '')}) — {av.category}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
 
-                {/* PASO 2: 30 Avatares Reales IA + Duración Sin Límite + Capítulos */}
-                <div className="lg:col-span-4 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider">
-                        02 · Avatar Real & Duración Sin Límite
-                      </span>
-                      <span className="text-xs font-mono font-extrabold text-indigo-700">
-                        30 Voces IA
-                      </span>
-                    </div>
+                      {/* Duration & Chapters */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-700 block">
+                            Duración
+                          </label>
+                          <select
+                            value={videoDurationMode}
+                            onChange={(e) => setVideoDurationMode(e.target.value)}
+                            className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
+                          >
+                            <option value="unlimited">Sin límite</option>
+                            <option value="extended-10m">10+ Minutos</option>
+                            <option value="extended-30m">30+ Minutos</option>
+                            <option value="standard">Estándar</option>
+                          </select>
+                        </div>
 
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-white border border-slate-300">
-                      <img
-                        src={
-                          customAvatarUrl ||
-                          selectedAvatar.customPhotoUrl ||
-                          selectedAvatar.realPhotoUrl
-                        }
-                        alt={selectedAvatar.name}
-                        referrerPolicy="no-referrer"
-                        className="w-12 h-12 rounded-lg object-cover border border-slate-300 shrink-0 bg-slate-900"
-                      />
-                      <div className="flex-1 min-w-0 space-y-1">
-                        <label className="text-xs font-extrabold text-slate-800 block truncate">
-                          Narrador ({selectedAvatar.accent})
+                        <div className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-700 block">
+                            Capítulos
+                          </label>
+                          <select
+                            value={targetChaptersCount}
+                            onChange={(e) => setTargetChaptersCount(Number(e.target.value))}
+                            className="w-full rounded-lg bg-white border border-slate-300 px-2.5 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-amber-500"
+                          >
+                            <option value={5}>5 Capítulos</option>
+                            <option value={8}>8 Capítulos</option>
+                            <option value={10}>10 Capítulos</option>
+                            <option value={12}>12 Capítulos</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Visual Style */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-700 block">
+                          Estilo editorial y escenas
                         </label>
                         <select
-                          value={selectedAvatar.id}
-                          onChange={(e) => {
-                            const found = NARRATOR_AVATAR_PRESETS.find(
-                              (a) => a.id === e.target.value
-                            );
-                            if (found) {
-                              setSelectedAvatar(found);
-                              setCustomAvatarUrl(undefined);
-                              setVoiceName(found.voiceName);
-                              setVoiceGender(found.gender);
-                            }
-                          }}
-                          className="w-full rounded-lg bg-slate-50 border border-slate-300 px-2.5 py-2 text-xs sm:text-sm font-bold text-slate-950 focus:outline-none focus:border-indigo-600"
+                          value={bookStyle}
+                          onChange={(e) => setBookStyle(e.target.value)}
+                          className="w-full rounded-lg bg-white border border-slate-300 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-900 focus:outline-none focus:border-amber-500"
                         >
-                          {NARRATOR_AVATAR_PRESETS.map((av) => (
-                            <option key={av.id} value={av.id}>
-                              #{String(av.number).padStart(2, '0')} {av.name} ({av.accent.replace('Español ', '')}) — {av.category}
+                          {BOOK_STYLE_PRESETS.map((st) => (
+                            <option key={st} value={st}>
+                              {st}
                             </option>
                           ))}
                         </select>
                       </div>
-                    </div>
 
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div className="space-y-1">
-                        <label className="text-xs font-extrabold text-slate-800 block">
-                          Duración del Video
-                        </label>
-                        <select
-                          value={videoDurationMode}
-                          onChange={(e) => setVideoDurationMode(e.target.value)}
-                          className="w-full rounded-xl bg-emerald-50 border border-emerald-300 px-2.5 py-2 text-xs font-extrabold text-emerald-950 focus:outline-none focus:border-emerald-600"
-                        >
-                          <option value="unlimited">∞ Sin Límite de Tiempo</option>
-                          <option value="extended-10m">10+ Minutos Extendido</option>
-                          <option value="extended-30m">30+ Minutos Audiolibro</option>
-                          <option value="standard">Estándar por Capítulo</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-xs font-extrabold text-slate-800 block">
-                          Capítulos Iniciales
-                        </label>
-                        <select
-                          value={targetChaptersCount}
-                          onChange={(e) => setTargetChaptersCount(Number(e.target.value))}
-                          className="w-full rounded-xl bg-white border border-slate-300 px-2.5 py-2 text-xs font-extrabold text-slate-950 focus:outline-none focus:border-indigo-600"
-                        >
-                          <option value={5}>5 Capítulos</option>
-                          <option value={8}>8 Capítulos (Recomendado)</option>
-                          <option value={10}>10 Capítulos</option>
-                          <option value={12}>12 Capítulos Completos</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-xs font-extrabold text-slate-800 block">
-                        Estilo Cinematográfico de las Escenas
-                      </label>
-                      <select
-                        value={bookStyle}
-                        onChange={(e) => setBookStyle(e.target.value)}
-                        className="w-full rounded-xl bg-white border border-slate-300 px-3 py-2 text-xs sm:text-sm font-bold text-slate-950 focus:outline-none focus:border-indigo-600"
-                      >
-                        {BOOK_STYLE_PRESETS.map((st) => (
-                          <option key={st} value={st}>
-                            {st}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="text-xs font-bold text-slate-800 flex items-center justify-between pt-2 border-t border-slate-300">
-                    <span>Videos y Audios Sin Límite de Tiempo</span>
-                    <span className="text-indigo-700 font-mono font-extrabold">MP4 · MP3 · PDF</span>
-                  </div>
-                </div>
-
-                {/* PASO 3: Botones de Creación Modernos + Suscríbete ahora */}
-                <div className="lg:col-span-3 bg-[#FAFAFC] border border-slate-300 rounded-2xl p-5 flex flex-col justify-between gap-3">
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono font-extrabold text-slate-950 uppercase tracking-wider block">
-                      03 · Producción Sin Límite
-                    </span>
-                    <p className="text-xs sm:text-sm font-medium text-slate-800 leading-relaxed">
-                      Genera el audiolibro completo con escenas de los 12 nichos en alta definición.
-                    </p>
-                  </div>
-
-                  {videoBookError && (
-                    <div className="p-3 rounded-xl bg-red-50 border border-red-300 text-xs sm:text-sm text-red-900 font-bold">
-                      {videoBookError}
-                    </div>
-                  )}
-
-                  <div className="space-y-2.5">
-                    <button
-                      type="button"
-                      onClick={() => handleCreateVideoBookFromPdf(false)}
-                      disabled={isGeneratingVideoBook || isGeneratingAllPages}
-                      className="w-full py-3 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                      {isGeneratingVideoBook ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          <span>Adaptando PDF Sin Límite...</span>
-                        </>
-                      ) : (
-                        <>
-                          <BookOpen className="w-4 h-4" />
-                          <span>Crear Audiolibro desde PDF</span>
-                        </>
+                      {videoBookError && (
+                        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-900 font-semibold">
+                          {videoBookError}
+                        </div>
                       )}
-                    </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleCreateVideoBookFromPdf(true)}
-                      disabled={
-                        isGeneratingVideoBook || isGeneratingAllPages || isGeneratingNarration
-                      }
-                      className="w-full py-3 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                      <span>Generar Completo (Voz + Video)</span>
-                    </button>
-
-                    {/* Botón 'Reproducir video' - Se activa automáticamente al finalizar isGeneratingVideoBook */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVideobookViewMode('player');
-                        setPlayerAutoPlayTrigger((prev) => prev + 1);
-                        setTimeout(() => {
-                          const player = document.getElementById('audiobook-master-player');
-                          if (player) {
-                            player.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                          }
-                        }, 50);
-                      }}
-                      disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
-                      className={`w-full py-3.5 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                        !isGeneratingVideoBook && videoBook.pages.length > 0
-                          ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 shadow-[0_0_18px_rgba(245,158,11,0.45)] ring-2 ring-amber-400/90 transform hover:scale-[1.02]'
-                          : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
-                      }`}
-                    >
-                      {isGeneratingVideoBook ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin text-slate-700" />
-                          <span className="text-slate-700">Generando Audiolibro IA...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play
-                            className={`w-4 h-4 ${
-                              videoBook.pages.length > 0
-                                ? 'fill-current text-slate-950'
-                                : 'text-slate-400'
-                            }`}
-                          />
-                          <span>Reproducir video</span>
-                          {videoBook.pages.length > 0 && (
-                            <span className="ml-1 text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-slate-950 text-amber-300 shadow-xs">
-                              Listo
-                            </span>
+                      {/* Hairline Separator + Clean Action Hierarchy */}
+                      <div className="pt-4 border-t border-slate-200 space-y-2.5">
+                        <button
+                          type="button"
+                          onClick={() => handleCreateVideoBookFromPdf(false)}
+                          disabled={isGeneratingVideoBook || isGeneratingAllPages}
+                          className="w-full py-3 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          {isGeneratingVideoBook ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Generando Audiolibro IA...</span>
+                            </>
+                          ) : (
+                            <>
+                              <BookOpen className="w-4 h-4" />
+                              <span>Crear Audiolibro desde PDF</span>
+                            </>
                           )}
-                        </>
-                      )}
-                    </button>
+                        </button>
 
-                    <div className="grid grid-cols-2 gap-2 pt-0.5">
-                      <button
-                        type="button"
-                        onClick={() => handleSaveCurrentAudiobookToFolder('MP3')}
-                        disabled={isSavingToFolder !== null}
-                        className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <FolderOpen className="w-4 h-4 text-slate-700" />
-                        <span>Guardar MP3</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSaveCurrentAudiobookToFolder('MP4')}
-                        disabled={isSavingToFolder !== null}
-                        className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                      >
-                        <FolderOpen className="w-4 h-4 text-indigo-700" />
-                        <span>Guardar MP4</span>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCreateVideoBookFromPdf(true)}
+                          disabled={
+                            isGeneratingVideoBook || isGeneratingAllPages || isGeneratingNarration
+                          }
+                          className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-700" />
+                          <span>Generar Completo (Voz + Video)</span>
+                        </button>
+
+                        {/* Botón 'Reproducir aquí (sin pantalla)' + 'Reproducir video' - Se activan automáticamente al finalizar isGeneratingVideoBook */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={handleToggleBackgroundPlay}
+                            disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                            className={`py-3 px-3 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                              isBgPlaying
+                                ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
+                                : !isGeneratingVideoBook && videoBook.pages.length > 0
+                                  ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                                  : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                            }`}
+                            title="Reproducir o pausar el audio directamente aquí sin abrir la pantalla de video"
+                          >
+                            {isBgPlaying ? (
+                              <>
+                                <Pause className="w-4 h-4 fill-current shrink-0" />
+                                <span>Pausar audio</span>
+                              </>
+                            ) : (
+                              <>
+                                <Headphones className="w-4 h-4 shrink-0" />
+                                <span>Escuchar aquí</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={openPlayerModal}
+                            disabled={isGeneratingVideoBook || videoBook.pages.length === 0}
+                            className={`py-3 px-3 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                              !isGeneratingVideoBook && videoBook.pages.length > 0
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300'
+                                : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                            }`}
+                            title="Abrir la pantalla de reproducción de video dentro de este botón"
+                          >
+                            {isGeneratingVideoBook ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin text-slate-700 shrink-0" />
+                                <span className="text-slate-700">Preparando...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Play className="w-4 h-4 fill-current shrink-0" />
+                                <span>Reproducir video</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Quick Save MP3 / MP4 Row */}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveCurrentAudiobookToFolder('MP3')}
+                            disabled={isSavingToFolder !== null}
+                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Guardar MP3</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveCurrentAudiobookToFolder('MP4')}
+                            disabled={isSavingToFolder !== null}
+                            className="py-2 px-3 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Guardar MP4</span>
+                          </button>
+                        </div>
+                      </div>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleOpenPayPalForBook(
-                          videoBook.bookTitle,
-                          videoBook.subtitle,
-                          pageImages[0],
-                          videoBook.pages.length
-                        )
-                      }
-                      className="w-full py-2.5 px-3 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-extrabold text-xs sm:text-sm flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
-                    >
-                      <span>Suscríbete ahora</span>
-                    </button>
                   </div>
-                </div>
-              </div>
-            </section>
+                </section>
+              )}
 
-            {/* Folder Vault for Saving & Downloading Audiobooks in MP3 or MP4 */}
-            {showAudiobookFolder && (
-              <div className="order-4">
+              {/* =================================================================
+                  TAB 2: MI BIBLIOTECA (Clean Folder Vault View)
+                 ================================================================= */}
+              {videobookViewMode === 'library' && (
                 <AudiobookFolderVault
                   savedAudiobooks={savedAudiobooks}
                   customFolders={customFolders}
@@ -3353,14 +3336,9 @@ ${textoPdf || '{{texto_pdf}}'}
                     if (item.videoBook.fullNarration) {
                       setNarrationScript(item.videoBook.fullNarration);
                     }
-                    setVideobookViewMode('player');
+                    stopBackgroundPlayback();
+                    setIsPlayerModalOpen(true);
                     setPlayerAutoPlayTrigger((prev) => prev + 1);
-                    setTimeout(() => {
-                      const playerEl = document.getElementById('audiobook-master-player');
-                      if (playerEl) {
-                        playerEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
-                    }, 100);
                     toast.success(
                       'Audiolibro Cargado en Reproductor',
                       `"${item.title}" listo para reproducir.`
@@ -3434,170 +3412,9 @@ ${textoPdf || '{{texto_pdf}}'}
                   isSavingToFolder={isSavingToFolder}
                   saveProgressPct={saveFolderProgress}
                 />
-              </div>
-            )}
-
-            {/* Interactive Spoken Audiobook & Video-eBook Stage with Talking Avatar + 1,200 Topic Scenes + Unlimited Chapters */}
-            <div
-              id="audiobook-master-player"
-              className={`scroll-mt-6 space-y-4 transition-all ${
-                videobookViewMode === 'player' ? 'order-3' : 'order-5'
-              }`}
-            >
-              {videobookViewMode === 'player' && (
-                <div className="flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-50 border border-amber-300 p-4 rounded-2xl shadow-xs">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-yellow-400 flex items-center justify-center text-slate-950 font-black shadow-xs">
-                      <Play className="w-5 h-5 fill-current" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] font-mono font-extrabold uppercase tracking-wider text-amber-900 bg-amber-200/70 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                          Pantalla de Reproducir Audiolibro
-                        </span>
-                        <span className="text-xs font-bold text-slate-700">
-                          {videoBook.pages.length} Capítulos Sincronizados
-                        </span>
-                      </div>
-                      <h2 className="text-base sm:text-lg font-black text-slate-950 mt-0.5">
-                        {videoBook.bookTitle || 'Audiolibro IA'}
-                      </h2>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVideobookViewMode('creator');
-                        setTimeout(() => {
-                          const stage = document.getElementById('audiobook-creation-stage');
-                          if (stage) stage.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }, 80);
-                      }}
-                      className="text-xs px-3.5 py-2.5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 border border-slate-300 font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                    >
-                      <BookOpen className="w-4 h-4 text-slate-700" />
-                      <span>+ Crear Otro desde PDF</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAudiobookFolder(!showAudiobookFolder)}
-                      className={`text-xs px-3.5 py-2.5 rounded-xl font-extrabold flex items-center gap-1.5 border transition-all cursor-pointer shadow-xs ${
-                        showAudiobookFolder
-                          ? 'bg-slate-950 text-white border-slate-950'
-                          : 'bg-white text-slate-950 border-slate-300 hover:bg-slate-100'
-                      }`}
-                    >
-                      <FolderOpen className="w-4 h-4" />
-                      <span>Biblioteca ({savedAudiobooks.length})</span>
-                    </button>
-                  </div>
-                </div>
               )}
-
-              <VideoBookPlayer
-              videoBook={videoBook}
-              onAddUnlimitedChapter={() => {
-                setVideoBook((prev) => {
-                  const nextNum = prev.pages.length + 1;
-                  const newPage = {
-                    pageNumber: nextNum,
-                    chapterTitle: `Capítulo ${nextNum}: Desarrollo Extendido Sin Límite`,
-                    pageText:
-                      'Este nuevo capítulo amplía la obra sin límite de tiempo, integrando escenas visuales de alta definición y narración sincronizada.',
-                    keyQuote:
-                      'La narrativa sin límite de tiempo permite profundizar en cada idea con claridad cinematográfica.',
-                    imagePrompt:
-                      'Cinematic editorial illustration of an illuminated library and golden horizon, 8k',
-                    durationSec: 15,
-                    primaryHex: '#0D1322',
-                    secondaryHex: '#1B2845',
-                    accentHex: '#F59E0B',
-                  };
-                  const nextPages = [...prev.pages, newPage];
-                  const nextFullNarration = nextPages
-                    .map((p) => `Capítulo ${p.pageNumber}: ${p.chapterTitle}. ${p.pageText}`)
-                    .join(' ');
-                  setNarrationScript(nextFullNarration);
-                  return {
-                    ...prev,
-                    pages: nextPages,
-                    fullNarration: nextFullNarration,
-                    totalEstimatedSec: nextPages.reduce(
-                      (acc, p) => acc + (Number(p.durationSec) || 10),
-                      0
-                    ),
-                  };
-                });
-              }}
-              onUpdateChapterDuration={(pageIdx, newDurationSec) => {
-                setVideoBook((prev) => {
-                  const nextPages = prev.pages.map((p, idx) =>
-                    idx === pageIdx ? { ...p, durationSec: Math.max(4, newDurationSec) } : p
-                  );
-                  return {
-                    ...prev,
-                    pages: nextPages,
-                    totalEstimatedSec: nextPages.reduce(
-                      (acc, p) => acc + (Number(p.durationSec) || 10),
-                      0
-                    ),
-                  };
-                });
-              }}
-              pageImages={pageImages}
-              generatingPageIdx={generatingPageIdx}
-              isGeneratingAllPages={isGeneratingAllPages}
-              onGeneratePageImage={(idx) => handleGeneratePageIllustration(idx)}
-              onGenerateAllPageImages={() => handleGenerateAllBookIllustrations()}
-              onAssignPageImage={(idx, imageUrl) => {
-                setPageImages((prev) => ({ ...prev, [idx]: imageUrl }));
-                setExportedBookMp4Url(null);
-              }}
-              onAssignMultiplePageImages={(imagesMap) => {
-                setPageImages((prev) => ({ ...prev, ...imagesMap }));
-                setExportedBookMp4Url(null);
-              }}
-              takes={voiceTakes}
-              selectedTakeId={activeTakeId}
-              onSelectTake={(id) => setActiveTakeId(id)}
-              isGeneratingAudio={isGeneratingNarration}
-              onGenerateBookAudio={() => handleGenerateNarration(videoBook.fullNarration)}
-              isExportingMp4={isExportingBookMp4}
-              mp4Progress={bookMp4Progress}
-              exportedMp4Url={exportedBookMp4Url}
-              onExportMp4={handleExportVideoBookMp4}
-              onExportMp3={handleExportVideoBookMp3}
-              onExportPdf={() => exportVideoBookAsPdf(videoBook)}
-              onExportTxt={() => exportVideoBookAsTxt(videoBook)}
-              activePageIdx={activeBookPageIdx}
-              onPageChange={setActiveBookPageIdx}
-              visualMode={audiobookVisualMode}
-              onVisualModeChange={setAudiobookVisualMode}
-              selectedAvatar={selectedAvatar}
-              onSelectAvatar={(av) => {
-                setSelectedAvatar(av);
-                setCustomAvatarUrl(undefined);
-                setVoiceName(av.voiceName);
-                setVoiceGender(av.gender);
-              }}
-              customAvatarUrl={customAvatarUrl}
-              onUploadCustomAvatar={(url) => setCustomAvatarUrl(url)}
-              onSellWithPayPal={() =>
-                handleOpenPayPalForBook(
-                  videoBook.bookTitle,
-                  videoBook.subtitle,
-                  pageImages[0],
-                  videoBook.pages.length
-                )
-              }
-              autoPlayTrigger={playerAutoPlayTrigger}
-            />
             </div>
-          </div>
-        )}
+          )}
 
         {/* =====================================================================
             MODULE 02: DIRECTOR AUDIOVISUAL — ADAPTADOR DE PDF A PROPUESTA IA
@@ -6377,22 +6194,185 @@ ${textoPdf || '{{texto_pdf}}'}
         )}
       </main>
 
-      {/* Floating Real-Time Storyboard Video Preview Monitor synced with Narration Audio */}
-      <FloatingStoryboardPlayer
-        projectTitle={proposal.projectTitle}
-        targetFormat={proposal.targetFormat}
-        storyboard={proposal.storyboard}
-        voiceTakes={voiceTakes}
-        activeTakeId={activeTakeId}
-        onSelectTake={(id) => setActiveTakeId(id)}
-        activeSceneIndex={activeStoryboardSceneIdx}
-        onActiveSceneChange={setActiveStoryboardSceneIdx}
-        onSynthesizeFullVoiceover={() => {
-          setNarrationScript(proposal.fullVoiceoverScript);
-          handleGenerateNarration(proposal.fullVoiceoverScript);
-        }}
-        isSynthesizingVoiceover={isGeneratingNarration}
-      />
+      {/* Floating Storyboard Preview Monitor (only available in PDF Director module, closed by default) */}
+      {activeModule === 'pdf-director' && (
+        <FloatingStoryboardPlayer
+          projectTitle={proposal.projectTitle}
+          targetFormat={proposal.targetFormat}
+          storyboard={proposal.storyboard}
+          voiceTakes={voiceTakes}
+          activeTakeId={activeTakeId}
+          onSelectTake={(id) => setActiveTakeId(id)}
+          activeSceneIndex={activeStoryboardSceneIdx}
+          onActiveSceneChange={setActiveStoryboardSceneIdx}
+          onSynthesizeFullVoiceover={() => {
+            setNarrationScript(proposal.fullVoiceoverScript);
+            handleGenerateNarration(proposal.fullVoiceoverScript);
+          }}
+          isSynthesizingVoiceover={isGeneratingNarration}
+        />
+      )}
+
+      {/* Dedicated Audiobook Reproduction Screen Modal — housed inside the 'Reproducir' button */}
+      {isPlayerModalOpen && (
+        <div
+          id="audiobook-master-player"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reproductor de Audiolibro IA"
+          className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-5 overflow-y-auto"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setIsPlayerModalOpen(false);
+            }
+          }}
+        >
+          <div className="relative w-full max-w-6xl max-h-[94vh] bg-white border border-amber-200 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between gap-3 px-5 py-3.5 bg-white border-b border-amber-200/80 shrink-0">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="font-bold text-amber-800">Pantalla de Reproducción</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="font-mono tabular-nums">
+                    {videoBook.pages.length} capítulos sincronizados
+                  </span>
+                </div>
+                <h3 className="text-base sm:text-lg font-extrabold text-amber-900 truncate mt-0.5">
+                  {videoBook.bookTitle || 'Audiolibro IA'}
+                </h3>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPlayerModalOpen(false);
+                    setActiveModule('videobook');
+                    setVideobookViewMode('library');
+                  }}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                >
+                  <FolderOpen className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Biblioteca ({savedAudiobooks.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPlayerModalOpen(false)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-950 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                  aria-label="Cerrar pantalla de reproducción"
+                >
+                  <X className="w-4 h-4" />
+                  <span>Cerrar</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Scrollable Player Body */}
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5 bg-slate-50/60">
+              <VideoBookPlayer
+                videoBook={videoBook}
+                onAddUnlimitedChapter={() => {
+                  setVideoBook((prev) => {
+                    const nextNum = prev.pages.length + 1;
+                    const newPage = {
+                      pageNumber: nextNum,
+                      chapterTitle: `Capítulo ${nextNum}: Desarrollo Extendido Sin Límite`,
+                      pageText:
+                        'Este nuevo capítulo amplía la obra sin límite de tiempo, integrando escenas visuales de alta definición y narración sincronizada.',
+                      keyQuote:
+                        'La narrativa sin límite de tiempo permite profundizar en cada idea con claridad cinematográfica.',
+                      imagePrompt:
+                        'Cinematic editorial illustration of an illuminated library and golden horizon, 8k',
+                      durationSec: 15,
+                      primaryHex: '#0D1322',
+                      secondaryHex: '#1B2845',
+                      accentHex: '#F59E0B',
+                    };
+                    const nextPages = [...prev.pages, newPage];
+                    const nextFullNarration = nextPages
+                      .map((p) => `Capítulo ${p.pageNumber}: ${p.chapterTitle}. ${p.pageText}`)
+                      .join(' ');
+                    setNarrationScript(nextFullNarration);
+                    return {
+                      ...prev,
+                      pages: nextPages,
+                      fullNarration: nextFullNarration,
+                      totalEstimatedSec: nextPages.reduce(
+                        (acc, p) => acc + (Number(p.durationSec) || 10),
+                        0
+                      ),
+                    };
+                  });
+                }}
+                onUpdateChapterDuration={(pageIdx, newDurationSec) => {
+                  setVideoBook((prev) => {
+                    const nextPages = prev.pages.map((p, idx) =>
+                      idx === pageIdx ? { ...p, durationSec: Math.max(4, newDurationSec) } : p
+                    );
+                    return {
+                      ...prev,
+                      pages: nextPages,
+                      totalEstimatedSec: nextPages.reduce(
+                        (acc, p) => acc + (Number(p.durationSec) || 10),
+                        0
+                      ),
+                    };
+                  });
+                }}
+                pageImages={pageImages}
+                generatingPageIdx={generatingPageIdx}
+                isGeneratingAllPages={isGeneratingAllPages}
+                onGeneratePageImage={(idx) => handleGeneratePageIllustration(idx)}
+                onGenerateAllPageImages={() => handleGenerateAllBookIllustrations()}
+                onAssignPageImage={(idx, imageUrl) => {
+                  setPageImages((prev) => ({ ...prev, [idx]: imageUrl }));
+                  setExportedBookMp4Url(null);
+                }}
+                onAssignMultiplePageImages={(imagesMap) => {
+                  setPageImages((prev) => ({ ...prev, ...imagesMap }));
+                  setExportedBookMp4Url(null);
+                }}
+                takes={voiceTakes}
+                selectedTakeId={activeTakeId}
+                onSelectTake={(id) => setActiveTakeId(id)}
+                isGeneratingAudio={isGeneratingNarration}
+                onGenerateBookAudio={() => handleGenerateNarration(videoBook.fullNarration)}
+                isExportingMp4={isExportingBookMp4}
+                mp4Progress={bookMp4Progress}
+                exportedMp4Url={exportedBookMp4Url}
+                onExportMp4={handleExportVideoBookMp4}
+                onExportMp3={handleExportVideoBookMp3}
+                onExportPdf={() => exportVideoBookAsPdf(videoBook)}
+                onExportTxt={() => exportVideoBookAsTxt(videoBook)}
+                activePageIdx={activeBookPageIdx}
+                onPageChange={setActiveBookPageIdx}
+                visualMode={audiobookVisualMode}
+                onVisualModeChange={setAudiobookVisualMode}
+                selectedAvatar={selectedAvatar}
+                onSelectAvatar={(av) => {
+                  setSelectedAvatar(av);
+                  setCustomAvatarUrl(undefined);
+                  setVoiceName(av.voiceName);
+                  setVoiceGender(av.gender);
+                }}
+                customAvatarUrl={customAvatarUrl}
+                onUploadCustomAvatar={(url) => setCustomAvatarUrl(url)}
+                onSellWithPayPal={() => {
+                  setIsPlayerModalOpen(false);
+                  handleOpenPayPalForBook(
+                    videoBook.bookTitle,
+                    videoBook.subtitle,
+                    pageImages[0],
+                    videoBook.pages.length
+                  );
+                }}
+                autoPlayTrigger={playerAutoPlayTrigger}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Administrator Account & Control Center Modal */}
       <AdminControlModal
@@ -6455,44 +6435,45 @@ ${textoPdf || '{{texto_pdf}}'}
         language={currentLanguage}
       />
 
-      {/* Quiet Studio Footer */}
-      <footer className="border-t border-white/6 py-4 px-6 mt-12">
-        <div className="max-w-[1440px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
-          <div>
-            KINETIX ESTUDIO IA · Dirección Audiovisual desde PDF, Storyboard IA, Locución Neuronal y Exportación MP4 / MP3
+        {/* Quiet Studio Footer */}
+        <footer className="border-t border-slate-200 py-4 px-6 mt-12">
+          <div className="max-w-[1280px] mx-auto flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
+            <div>
+              KINETIX ESTUDIO IA · Audiolibros desde PDF, Storyboard, Locución Neuronal y Exportación MP4 / MP3
+            </div>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setActiveModule('pdf-director')}
+                className="hover:text-amber-800 cursor-pointer"
+              >
+                01. Director PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModule('script')}
+                className="hover:text-amber-800 cursor-pointer"
+              >
+                02. Guion 2 Min
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModule('narration')}
+                className="hover:text-amber-800 cursor-pointer"
+              >
+                03. Locución
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveModule('sequence')}
+                className="hover:text-amber-800 cursor-pointer"
+              >
+                04. Clips MP4/MP3
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => setActiveModule('pdf-director')}
-              className="hover:text-slate-300 cursor-pointer"
-            >
-              01. PDF a Propuesta IA
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveModule('script')}
-              className="hover:text-slate-300 cursor-pointer"
-            >
-              02. Guion 2 Min
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveModule('narration')}
-              className="hover:text-slate-300 cursor-pointer"
-            >
-              03. Locución
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveModule('sequence')}
-              className="hover:text-slate-300 cursor-pointer"
-            >
-              04. Clips MP4/MP3
-            </button>
-          </div>
-        </div>
-      </footer>
+        </footer>
+      </div>
     </div>
   );
 }

@@ -6,8 +6,6 @@ import {
   Trash2,
   Share2,
   RefreshCw,
-  Sparkles,
-  DollarSign,
   Zap,
 } from 'lucide-react';
 import { SupportedLanguage, t } from '../utils/i18n';
@@ -23,6 +21,7 @@ export interface UnifiedActionToolbarProps {
   onTestearPago: () => void;
   userTokenBalance: number;
   isGenerating?: boolean;
+  isPlayingBg?: boolean;
   language?: SupportedLanguage;
 }
 
@@ -37,231 +36,134 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
   onTestearPago,
   userTokenBalance,
   isGenerating = false,
+  isPlayingBg = false,
   language = 'es',
 }) => {
   const [showConfirmDelete, setShowConfirmDelete] = useState(false);
 
   return (
-    <div className="w-full space-y-4 mb-8">
-      {/* =====================================================================
-          1. BARRA SUPERIOR DE MONETIZACIÓN & PAGOS REALES (SIEMPRE AL PRINCIPIO)
-         ===================================================================== */}
-      <div className="w-full rounded-2xl bg-gradient-to-r from-[#FFFDF9] via-[#FAF4E6] to-[#FFFBF0] border-2 border-amber-400/80 p-3.5 sm:p-4 shadow-[0_8px_30px_rgba(217,119,6,0.12)] flex flex-wrap items-center justify-between gap-3">
-        {/* Left: Monetization Pitch with Gold Letters */}
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 via-yellow-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-md shrink-0">
-            <DollarSign className="w-5 h-5 text-slate-950 stroke-[2.5]" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-black uppercase tracking-wider text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded border border-amber-300">
-                {t('monetizationTitle', language)}
-              </span>
-              <span className="hidden sm:inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            </div>
-            <h2 className="text-base sm:text-lg font-black bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 bg-clip-text text-transparent truncate">
-              {t('monetizationSub', language)}
-            </h2>
-          </div>
-        </div>
+    <div className="w-full bg-white border border-amber-200/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+      {/* Left: 6 Core Studio Actions in a clean single-row bar */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={onCrear}
+          disabled={isGenerating}
+          className="px-3 py-2 rounded-lg text-xs font-bold text-amber-900 bg-amber-50/70 hover:bg-amber-100 border border-amber-200/80 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+          title={t('actionCrearDesc', language)}
+        >
+          <Plus className="w-3.5 h-3.5 text-amber-700 stroke-[2.5]" />
+          <span>{t('actionCrear', language)}</span>
+        </button>
 
-        {/* Right: Quick Action Buttons for Monetization */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {/* Live Balance Badge */}
-          <div className="px-3 py-1.5 rounded-xl bg-white border border-amber-300 shadow-2xs flex items-center gap-2">
-            <span className="w-5 h-5 rounded-full bg-gradient-to-br from-amber-400 to-yellow-500 flex items-center justify-center text-[11px] font-black text-slate-950">
-              ⚡
-            </span>
-            <span className="font-mono text-xs font-black text-amber-900">
-              {userTokenBalance.toLocaleString()}
-            </span>
-            <span className="text-[11px] font-bold text-slate-500 hidden sm:inline">
-              {t('tokensBadge', language)}
-            </span>
-          </div>
+        <button
+          type="button"
+          onClick={onReproducir}
+          className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
+            isPlayingBg
+              ? 'bg-amber-500 text-slate-950 border-amber-600'
+              : 'text-amber-900 hover:bg-amber-50 border-transparent hover:border-amber-200/80'
+          }`}
+          title="Abrir la pantalla de reproducción dentro de este botón"
+        >
+          <Play className={`w-3.5 h-3.5 fill-current ${isPlayingBg ? 'text-slate-950' : 'text-amber-700'}`} />
+          <span>{t('actionReproducir', language)}</span>
+        </button>
 
-          {/* Test Real Payment Button ($5.00) */}
-          <button
-            type="button"
-            onClick={onTestearPago}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_4px_14px_rgba(245,158,11,0.35)] transition-all transform hover:scale-105 cursor-pointer"
-            title="Probar flujo de pago real con PayPal ($5.00 con acreditación de 62,500 tokens)"
-          >
-            <Zap className="w-3.5 h-3.5 text-slate-950 fill-current" />
-            <span>{t('testRealPayment', language)}</span>
-          </button>
+        <button
+          type="button"
+          onClick={onCargar}
+          className="px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:text-amber-900 hover:bg-amber-50 border border-transparent hover:border-amber-200/80 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          title={t('actionCargarDesc', language)}
+        >
+          <Upload className="w-3.5 h-3.5 text-amber-700" />
+          <span>{t('actionCargar', language)}</span>
+        </button>
 
-          {/* Botón Acceso / Empieza Ahora */}
-          <button
-            type="button"
-            onClick={onMonetizar}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-[0_4px_16px_rgba(245,158,11,0.4)] transition-all transform hover:scale-105 cursor-pointer border border-amber-600/40"
-            title="Empieza ahora antes de usar o ver - Botón Acceso"
-          >
-            <Zap className="w-3.5 h-3.5 text-slate-950 fill-current animate-pulse" />
-            <span className="uppercase tracking-wide font-black">
-              {t('btnAcceso', language) || 'EMPIEZA AHORA · BOTÓN ACCESO'}
-            </span>
-          </button>
-        </div>
-      </div>
+        <button
+          type="button"
+          onClick={onConvertir}
+          disabled={isGenerating}
+          className="px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:text-amber-900 hover:bg-amber-50 border border-transparent hover:border-amber-200/80 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+          title={t('actionConvertirDesc', language)}
+        >
+          <RefreshCw className={`w-3.5 h-3.5 text-amber-700 ${isGenerating ? 'animate-spin' : ''}`} />
+          <span>{t('actionConvertir', language)}</span>
+        </button>
 
-      {/* =====================================================================
-          2. BARRA UNIFICADA DE ACCIONES: CREAR, REPRODUCIR, CARGAR, ELIMINAR, COMPARTIR, CONVERTIR
-         ===================================================================== */}
-      <div className="w-full rounded-2xl bg-white border border-amber-300/80 p-4 shadow-[0_8px_25px_rgba(217,119,6,0.08)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b border-amber-100 pb-2.5">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
-            <span className="text-xs font-mono font-black uppercase tracking-wider bg-gradient-to-r from-amber-800 to-yellow-700 bg-clip-text text-transparent">
-              {t('toolbarTitle', language)}
-            </span>
-          </div>
-          <span className="text-xs font-bold text-slate-500">
-            {t('actionCompartirDesc', language)}
-          </span>
-        </div>
+        <button
+          type="button"
+          onClick={onCompartir}
+          className="px-3 py-2 rounded-lg text-xs font-bold text-slate-700 hover:text-amber-900 hover:bg-amber-50 border border-transparent hover:border-amber-200/80 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          title={t('actionCompartirDesc', language)}
+        >
+          <Share2 className="w-3.5 h-3.5 text-amber-700" />
+          <span>{t('actionCompartir', language)}</span>
+        </button>
 
-        {/* The 6 Buttons Grouped Together */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-          {/* 1. CREAR */}
-          <button
-            type="button"
-            onClick={onCrear}
-            disabled={isGenerating}
-            className="group px-3 py-3 rounded-xl bg-gradient-to-b from-[#FFFDF9] to-[#FEF8E7] hover:from-[#FEF5D6] hover:to-[#FDE8B5] border-2 border-amber-400/90 shadow-sm hover:shadow-md flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-            title={t('actionCrearDesc', language)}
-          >
-            <div className="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Plus className="w-4 h-4 stroke-[3]" />
-            </div>
-            <span className="font-display font-black text-xs sm:text-sm bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 bg-clip-text text-transparent tracking-wide">
-              {t('actionCrear', language)}
-            </span>
-            <span className="text-[10px] font-bold text-amber-900/70">
-              {t('actionCrearSub', language)}
-            </span>
-          </button>
+        <div className="h-4 w-px bg-slate-200 mx-0.5 hidden sm:block" />
 
-          {/* 2. REPRODUCIR */}
-          <button
-            type="button"
-            onClick={onReproducir}
-            className="group px-3 py-3 rounded-xl bg-gradient-to-b from-[#FFFDF9] to-[#FEF8E7] hover:from-[#FEF5D6] hover:to-[#FDE8B5] border-2 border-amber-400/90 shadow-sm hover:shadow-md flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-            title={t('actionReproducirDesc', language)}
-          >
-            <div className="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Play className="w-4 h-4 fill-current ml-0.5" />
-            </div>
-            <span className="font-display font-black text-xs sm:text-sm bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 bg-clip-text text-transparent tracking-wide">
-              {t('actionReproducir', language)}
+        {showConfirmDelete ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200">
+            <span className="text-xs font-semibold text-rose-800 whitespace-nowrap">
+              {t('deleteConfirmTitle', language)}
             </span>
-            <span className="text-[10px] font-bold text-amber-900/70">
-              {t('actionReproducirSub', language)}
-            </span>
-          </button>
-
-          {/* 3. CARGAR */}
-          <button
-            type="button"
-            onClick={onCargar}
-            className="group px-3 py-3 rounded-xl bg-gradient-to-b from-[#FFFDF9] to-[#FEF8E7] hover:from-[#FEF5D6] hover:to-[#FDE8B5] border-2 border-amber-400/90 shadow-sm hover:shadow-md flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-            title={t('actionCargarDesc', language)}
-          >
-            <div className="w-8 h-8 rounded-lg bg-amber-500 text-slate-950 flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Upload className="w-4 h-4 stroke-[2.5]" />
-            </div>
-            <span className="font-display font-black text-xs sm:text-sm bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 bg-clip-text text-transparent tracking-wide">
-              {t('actionCargar', language)}
-            </span>
-            <span className="text-[10px] font-bold text-amber-900/70">
-              {t('actionCargarSub', language)}
-            </span>
-          </button>
-
-          {/* 4. ELIMINAR */}
-          {showConfirmDelete ? (
-            <div className="px-2 py-2 rounded-xl bg-rose-50 border-2 border-rose-400 flex flex-col items-center justify-center gap-1 text-center shadow-sm">
-              <span className="text-[10px] font-bold text-rose-800">
-                {t('deleteConfirmTitle', language)}
-              </span>
-              <div className="flex items-center gap-1 w-full justify-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onEliminar();
-                    setShowConfirmDelete(false);
-                  }}
-                  className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-black text-[10px] cursor-pointer"
-                >
-                  {t('deleteConfirmBtn', language)}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmDelete(false)}
-                  className="px-2 py-1 rounded bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[10px] cursor-pointer"
-                >
-                  {t('cancel', language)}
-                </button>
-              </div>
-            </div>
-          ) : (
             <button
               type="button"
-              onClick={() => setShowConfirmDelete(true)}
-              className="group px-3 py-3 rounded-xl bg-gradient-to-b from-[#FFFDF9] to-[#FEF8E7] hover:from-[#FEECEB] hover:to-[#FDD5D5] border-2 border-amber-400/90 hover:border-rose-400 shadow-sm hover:shadow-md flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-              title={t('actionEliminarDesc', language)}
+              onClick={() => {
+                onEliminar();
+                setShowConfirmDelete(false);
+              }}
+              className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer whitespace-nowrap"
             >
-              <div className="w-8 h-8 rounded-lg bg-slate-900 group-hover:bg-rose-600 text-white flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-                <Trash2 className="w-4 h-4 stroke-[2.2]" />
-              </div>
-              <span className="font-display font-black text-xs sm:text-sm bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 group-hover:from-rose-700 group-hover:to-rose-600 bg-clip-text text-transparent tracking-wide">
-                {t('actionEliminar', language)}
-              </span>
-              <span className="text-[10px] font-bold text-amber-900/70 group-hover:text-rose-700">
-                {t('actionEliminarSub', language)}
-              </span>
+              {t('deleteConfirmBtn', language)}
             </button>
-          )}
-
-          {/* 5. COMPARTIR */}
+            <button
+              type="button"
+              onClick={() => setShowConfirmDelete(false)}
+              className="px-2 py-1 rounded bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-xs cursor-pointer whitespace-nowrap"
+            >
+              {t('cancel', language)}
+            </button>
+          </div>
+        ) : (
           <button
             type="button"
-            onClick={onCompartir}
-            className="group px-3 py-3 rounded-xl bg-gradient-to-b from-[#FFFDF9] to-[#FEF8E7] hover:from-[#FEF5D6] hover:to-[#FDE8B5] border-2 border-amber-400/90 shadow-sm hover:shadow-md flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0 relative overflow-hidden"
-            title={t('actionCompartirDesc', language)}
+            onClick={() => setShowConfirmDelete(true)}
+            className="px-2.5 py-2 rounded-lg text-xs font-semibold text-slate-500 hover:text-rose-700 hover:bg-rose-50 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            title={t('actionEliminarDesc', language)}
           >
-            <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-yellow-400 text-slate-950 flex items-center justify-center shadow-xs group-hover:scale-110 transition-transform">
-              <Share2 className="w-4 h-4 stroke-[2.5]" />
-            </div>
-            <span className="font-display font-black text-xs sm:text-sm bg-gradient-to-r from-amber-800 via-amber-700 to-yellow-600 bg-clip-text text-transparent tracking-wide">
-              {t('actionCompartir', language)}
-            </span>
-            <span className="text-[10px] font-bold text-amber-900/70">
-              {t('actionCompartirSub', language)}
-            </span>
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>{t('actionEliminar', language)}</span>
           </button>
+        )}
+      </div>
 
-          {/* 6. CONVERTIR */}
-          <button
-            type="button"
-            onClick={onConvertir}
-            disabled={isGenerating}
-            className="group px-3 py-3 rounded-xl bg-gradient-to-b from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 border-2 border-amber-600 shadow-[0_4px_16px_rgba(245,158,11,0.35)] flex flex-col items-center justify-center gap-1 text-center transition-all cursor-pointer transform hover:-translate-y-0.5 active:translate-y-0"
-            title={t('actionConvertirDesc', language)}
-          >
-            <div className="w-8 h-8 rounded-lg bg-slate-950 text-amber-400 flex items-center justify-center shadow-xs group-hover:rotate-180 transition-transform duration-500">
-              <RefreshCw className="w-4 h-4 stroke-[2.5]" />
-            </div>
-            <span className="font-display font-black text-xs sm:text-sm text-slate-950 tracking-wide">
-              {t('actionConvertir', language)}
-            </span>
-            <span className="text-[10px] font-black text-slate-950/80">
-              {t('actionConvertirSub', language)}
-            </span>
-          </button>
-        </div>
+      {/* Right: Token balance + Quick Access / Test Payment */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-mono tabular-nums font-bold text-amber-800 pr-2 border-r border-slate-200">
+          <span>{userTokenBalance.toLocaleString()}</span>
+          <span className="font-sans font-medium text-slate-500">{t('tokensBadge', language)}</span>
+        </span>
+
+        <button
+          type="button"
+          onClick={onTestearPago}
+          className="px-3 py-1.5 rounded-lg text-xs font-bold text-amber-900 bg-white hover:bg-amber-50 border border-amber-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          title="Probar flujo de pago real con PayPal ($5.00)"
+        >
+          {t('testRealPayment', language)}
+        </button>
+
+        <button
+          type="button"
+          onClick={onMonetizar}
+          className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          title="Empieza ahora antes de usar o ver - Botón Acceso"
+        >
+          <Zap className="w-3.5 h-3.5 fill-current" />
+          <span>{t('btnAcceso', language) || 'EMPIEZA AHORA · BOTÓN ACCESO'}</span>
+        </button>
       </div>
     </div>
   );

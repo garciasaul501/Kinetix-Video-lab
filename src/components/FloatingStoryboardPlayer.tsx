@@ -54,7 +54,7 @@ export const FloatingStoryboardPlayer: React.FC<FloatingStoryboardPlayerProps> =
   onSynthesizeFullVoiceover,
   isSynthesizingVoiceover,
 }) => {
-  const [isOpen, setIsOpen] = useState<boolean>(true);
+  const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);

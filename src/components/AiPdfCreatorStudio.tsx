@@ -849,12 +849,12 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
               {isGeneratingPdf ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Creando PDF con IA...</span>
+                  <span>Creando PDF Completo con IA...</span>
                 </>
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  <span>Crear PDF con IA</span>
+                  <span>Crear PDF Completo con IA</span>
                 </>
               )}
             </button>

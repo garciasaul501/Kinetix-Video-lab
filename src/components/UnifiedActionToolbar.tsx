@@ -7,11 +7,14 @@ import {
   Share2,
   RefreshCw,
   Zap,
+  FilePlus2,
 } from 'lucide-react';
 import { SupportedLanguage, t } from '../utils/i18n';
 
 export interface UnifiedActionToolbarProps {
   onCrear: () => void;
+  onCrearPdfIa?: () => void;
+  isAiPdfActive?: boolean;
   onReproducir: () => void;
   onCargar: () => void;
   onEliminar: () => void;
@@ -28,6 +31,8 @@ export interface UnifiedActionToolbarProps {
 
 export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
   onCrear,
+  onCrearPdfIa,
+  isAiPdfActive = false,
   onReproducir,
   onCargar,
   onEliminar,
@@ -45,7 +50,7 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
 
   return (
     <div className="w-full bg-white border border-amber-200/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-      {/* Left: 6 Core Studio Actions in a clean single-row bar */}
+      {/* Left: Core Studio Actions in a clean single-row bar */}
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
@@ -57,6 +62,22 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
           <Plus className="w-3.5 h-3.5 text-amber-700 stroke-[2.5]" />
           <span>{t('actionCrear', language)}</span>
         </button>
+
+        {onCrearPdfIa && (
+          <button
+            type="button"
+            onClick={onCrearPdfIa}
+            className={`px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
+              isAiPdfActive
+                ? 'bg-slate-950 text-amber-400 border-amber-500/70'
+                : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-950 border-amber-400/80'
+            }`}
+            title="Abrir el Estudio Completo para Crear PDF con IA (Texto, Imágenes, Voz 24kHz, Subtítulos, MP4 y Monetización)"
+          >
+            <FilePlus2 className={`w-3.5 h-3.5 ${isAiPdfActive ? 'text-amber-400' : 'text-amber-700'}`} />
+            <span>Crear PDF Completo con IA</span>
+          </button>
+        )}
 
         <button
           type="button"

@@ -1,7 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, Download, RotateCcw, Music, Loader2, Check, Heart } from 'lucide-react';
-import { formatTimecode } from '../utils/audioWav';
+import { formatTimecode, pcmBase64ToWav } from '../utils/audioWav';
 import { downloadAudioAsMp3 } from '../utils/videoRenderer';
+import {
+  unlockStudioAudioContext,
+  playBase64AudioViaWebAudio,
+  WebAudioPlaybackHandle,
+} from '../utils/audioPlayerEngine';
 
 export interface VoiceoverTake {
   id: string;
@@ -28,6 +33,8 @@ interface StudioAudioPlayerProps {
 
 export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take, onToggleFavorite }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const webAudioRef = useRef<WebAudioPlaybackHandle | null>(null);
+  const timerRef = useRef<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(take.durationSec || 1);
@@ -35,7 +42,31 @@ export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take, onTo
   const [isExportingMp3, setIsExportingMp3] = useState<boolean>(false);
   const [mp3Ready, setMp3Ready] = useState<boolean>(false);
 
+  const resolvedWavUrl = useMemo(() => {
+    if (take.wavUrl && take.wavUrl.trim().length > 0) return take.wavUrl;
+    if (take.audioBase64) {
+      try {
+        return pcmBase64ToWav(take.audioBase64, 24000).wavUrl;
+      } catch {
+        return '';
+      }
+    }
+    return '';
+  }, [take.wavUrl, take.audioBase64]);
+
+  const stopWebAudio = () => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (webAudioRef.current) {
+      webAudioRef.current.stop();
+      webAudioRef.current = null;
+    }
+  };
+
   useEffect(() => {
+    stopWebAudio();
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(take.durationSec || 1);
@@ -44,26 +75,78 @@ export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take, onTo
       audioRef.current.currentTime = 0;
       audioRef.current.playbackRate = playbackRate;
     }
-  }, [take.id, take.wavUrl, take.durationSec]);
+    return () => {
+      stopWebAudio();
+    };
+  }, [take.id, resolvedWavUrl, take.durationSec]);
 
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (isPlaying) {
-      audio.pause();
-      setIsPlaying(false);
-    } else {
-      audio.play().catch(() => {});
+  const startWebAudioAt = async (offsetSec: number) => {
+    if (!take.audioBase64) return false;
+    try {
+      stopWebAudio();
+      const handle = await playBase64AudioViaWebAudio(take.audioBase64, {
+        startOffsetSec: offsetSec,
+        volume: 1.0,
+        muted: false,
+        onEnded: () => {
+          stopWebAudio();
+          setIsPlaying(false);
+          setCurrentTime(0);
+        },
+      });
+      webAudioRef.current = handle;
+      setDuration(handle.durationSec || take.durationSec || 1);
       setIsPlaying(true);
+      timerRef.current = window.setInterval(() => {
+        if (webAudioRef.current) {
+          setCurrentTime(webAudioRef.current.getCurrentTime());
+        }
+      }, 100);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const togglePlay = async () => {
+    unlockStudioAudioContext();
+    const audio = audioRef.current;
+
+    if (isPlaying) {
+      stopWebAudio();
+      if (audio) audio.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    // Prefer WebAudio API decoded playback when base64 is present (immune to iframe audio blocking)
+    if (take.audioBase64 && !take.isSyntheticFallback) {
+      const started = await startWebAudioAt(currentTime >= duration - 0.15 ? 0 : currentTime);
+      if (started) return;
+    }
+
+    if (audio && resolvedWavUrl) {
+      audio.muted = false;
+      audio.volume = 1.0;
+      audio.playbackRate = playbackRate;
+      audio.play().then(() => {
+        setIsPlaying(true);
+      }).catch(() => {
+        setIsPlaying(false);
+      });
     }
   };
 
   const handleSeek = (ratio: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
     const target = Math.max(0, Math.min(duration, ratio * duration));
-    audio.currentTime = target;
     setCurrentTime(target);
+    if (webAudioRef.current) {
+      startWebAudioAt(target);
+      return;
+    }
+    if (audioRef.current) {
+      audioRef.current.currentTime = target;
+    }
   };
 
   const cycleSpeed = () => {
@@ -101,9 +184,9 @@ export const StudioAudioPlayer: React.FC<StudioAudioPlayerProps> = ({ take, onTo
     <div className="bg-[#111318] border border-white/10 rounded-lg p-5 flex flex-col gap-4">
       <audio
         ref={audioRef}
-        src={take.wavUrl}
+        src={resolvedWavUrl || undefined}
         onTimeUpdate={() => {
-          if (audioRef.current) {
+          if (audioRef.current && !webAudioRef.current) {
             setCurrentTime(audioRef.current.currentTime);
           }
         }}

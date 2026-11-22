@@ -46,8 +46,16 @@ import {
   ChevronDown,
   ChevronUp,
   FilePlus2,
+  Users,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { pcmBase64ToWav } from './utils/audioWav';
+import {
+  unlockStudioAudioContext,
+  playBase64AudioViaWebAudio,
+  WebAudioPlaybackHandle,
+} from './utils/audioPlayerEngine';
 import {
   renderSequenceToVideoUrl,
   downloadAudioAsMp3,
@@ -701,11 +709,17 @@ export default function App() {
   const [playerAutoPlayTrigger, setPlayerAutoPlayTrigger] = useState<number>(0);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [showSamplePdfGrid, setShowSamplePdfGrid] = useState<boolean>(false);
+  // Botones dedicados para ocultar/mostrar Avatares (30) y Escenas (+1,200) — ocultos por defecto para un diseño limpio
+  const [showCreatorAvatars, setShowCreatorAvatars] = useState<boolean>(false);
+  const [showCreatorScenes, setShowCreatorScenes] = useState<boolean>(false);
+  const [isTestingVoice, setIsTestingVoice] = useState<boolean>(false);
 
   // --- BACKGROUND PLAYBACK STATE (Reproducir sin tener la pantalla del reproductor enfrente) ---
   const [isBgPlaying, setIsBgPlaying] = useState<boolean>(false);
   const [bgChapterIdx, setBgChapterIdx] = useState<number>(0);
   const bgAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bgWebAudioRef = useRef<WebAudioPlaybackHandle | null>(null);
+  const testVoiceHandleRef = useRef<WebAudioPlaybackHandle | null>(null);
   const bgPlayingRef = useRef<boolean>(false);
 
   // --- AUDIOBOOK MP3 / MP4 FOLDER VAULT STATE ---
@@ -864,12 +878,78 @@ ${textoPdf || '{{texto_pdf}}'}
   const stopBackgroundPlayback = () => {
     bgPlayingRef.current = false;
     setIsBgPlaying(false);
+    if (bgWebAudioRef.current) {
+      bgWebAudioRef.current.stop();
+      bgWebAudioRef.current = null;
+    }
+    if (testVoiceHandleRef.current) {
+      testVoiceHandleRef.current.stop();
+      testVoiceHandleRef.current = null;
+    }
     if (bgAudioRef.current) {
       bgAudioRef.current.pause();
       bgAudioRef.current.currentTime = 0;
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.cancel();
+    }
+  };
+
+  // Prueba instantánea de voz real 24kHz con el narrador seleccionado
+  const handleTestSelectedVoice = async () => {
+    unlockStudioAudioContext();
+    if (testVoiceHandleRef.current) {
+      testVoiceHandleRef.current.stop();
+      testVoiceHandleRef.current = null;
+    }
+    if (isTestingVoice) return;
+
+    setIsTestingVoice(true);
+    const sampleLine = `Hola, soy ${selectedAvatar.name}. Esta es mi voz real de estudio lista para narrar tu audiolibro con claridad cinematográfica.`;
+    try {
+      const response = await fetch('/api/narration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scriptText: sampleLine,
+          voiceGender: selectedAvatar.gender || voiceGender,
+          voiceName: selectedAvatar.voiceName || voiceName,
+          accent: selectedAvatar.accent || voiceAccent,
+          tone: voiceTone,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.audioBase64 && data.isRealVoice !== false) {
+        const handle = await playBase64AudioViaWebAudio(data.audioBase64, {
+          volume: 1.0,
+          muted: false,
+          sampleRate: data.sampleRate || 24000,
+          onEnded: () => {
+            testVoiceHandleRef.current = null;
+            setIsTestingVoice(false);
+          },
+        });
+        testVoiceHandleRef.current = handle;
+        toast.success(
+          `Escuchando voz: ${selectedAvatar.name}`,
+          'Audio real 24 kHz activo. Ajusta el volumen de tu dispositivo si es necesario.'
+        );
+      } else {
+        throw new Error('No se recibió audio real');
+      }
+    } catch {
+      // Fallback directo a síntesis del navegador desbloqueada
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.resume();
+        const utt = new SpeechSynthesisUtterance(sampleLine);
+        utt.lang = 'es-ES';
+        utt.onend = () => setIsTestingVoice(false);
+        utt.onerror = () => setIsTestingVoice(false);
+        window.speechSynthesis.speak(utt);
+      } else {
+        setIsTestingVoice(false);
+      }
     }
   };
 
@@ -887,6 +967,7 @@ ${textoPdf || '{{texto_pdf}}'}
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
+      window.speechSynthesis.resume();
       const page = pages[idx];
       const utterance = new SpeechSynthesisUtterance(
         `${page.chapterTitle}. ${page.pageText}`
@@ -901,6 +982,7 @@ ${textoPdf || '{{texto_pdf}}'}
               : 'es-ES';
       utterance.pitch = selectedAvatar.gender === 'masculina' ? 0.88 : 1.06;
       utterance.rate = 0.98;
+      utterance.volume = 1.0;
       utterance.onend = () => {
         if (bgPlayingRef.current) {
           speakBgChapter(idx + 1);
@@ -917,16 +999,53 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   };
 
-  const handleToggleBackgroundPlay = () => {
+  const playTakeAudioReliably = async (take: VoiceoverTake): Promise<boolean> => {
+    if (!take || take.isSyntheticFallback) return false;
+    // Prefer WebAudio API decoded playback from base64 because once AudioContext is unlocked
+    // on user click, it never gets blocked by iframe/async HTML5 <audio> policies.
+    if (take.audioBase64) {
+      try {
+        if (bgWebAudioRef.current) {
+          bgWebAudioRef.current.stop();
+          bgWebAudioRef.current = null;
+        }
+        const handle = await playBase64AudioViaWebAudio(take.audioBase64, {
+          startOffsetSec: 0,
+          volume: 1.0,
+          muted: false,
+          onEnded: () => {
+            bgWebAudioRef.current = null;
+            bgPlayingRef.current = false;
+            setIsBgPlaying(false);
+          },
+        });
+        bgWebAudioRef.current = handle;
+        return true;
+      } catch {
+        // Fall through to HTML5 audio element
+      }
+    }
+
+    if (take.wavUrl && bgAudioRef.current) {
+      try {
+        bgAudioRef.current.src = take.wavUrl;
+        bgAudioRef.current.muted = false;
+        bgAudioRef.current.volume = 1.0;
+        await bgAudioRef.current.play();
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+
+  const handleToggleBackgroundPlay = async () => {
+    // Desbloquear AudioContext sincrónicamente dentro del clic del usuario
+    unlockStudioAudioContext();
+
     if (isBgPlaying) {
-      bgPlayingRef.current = false;
-      setIsBgPlaying(false);
-      if (bgAudioRef.current) {
-        bgAudioRef.current.pause();
-      }
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-      }
+      stopBackgroundPlayback();
       return;
     }
 
@@ -947,31 +1066,51 @@ ${textoPdf || '{{texto_pdf}}'}
     bgPlayingRef.current = true;
     setIsBgPlaying(true);
 
-    if (
-      activeTake &&
-      activeTake.wavUrl &&
-      !activeTake.isSyntheticFallback &&
-      bgAudioRef.current
-    ) {
-      bgAudioRef.current.muted = false;
-      bgAudioRef.current.volume = 1.0;
-      bgAudioRef.current.play().catch(() => {
-        // Fallback to real browser voice narration if audio element cannot play
-        speakBgChapter(bgChapterIdx);
-      });
-    } else {
-      const startIdx = bgChapterIdx < videoBook.pages.length ? bgChapterIdx : 0;
-      speakBgChapter(startIdx);
+    // 1. Si ya tenemos una pista de voz real IA, reproducirla directo por WebAudio/HTML5
+    if (activeTake && !activeTake.isSyntheticFallback && (activeTake.audioBase64 || activeTake.wavUrl)) {
+      const started = await playTakeAudioReliably(activeTake);
+      if (started) {
+        toast.success(
+          'Reproduciendo tu Audiolibro (Voz IA)',
+          `"${videoBook.bookTitle || 'Audiolibro IA'}" se está escuchando ahora con voz real 24 kHz.`
+        );
+        return;
+      }
     }
 
-    toast.success(
-      'Reproduciendo tu Audiolibro',
-      `"${videoBook.bookTitle || 'Audiolibro IA'}" se está escuchando ahora.`
+    // 2. Si aún no hay pista de voz real (ej. recién cargado de biblioteca), sintetizarla ahora y reproducir al instante
+    const narrationText =
+      (videoBook.fullNarration && videoBook.fullNarration.trim().length > 10
+        ? videoBook.fullNarration.trim()
+        : videoBook.pages.map((p) => `${p.chapterTitle}. ${p.pageText}`).join(' '));
+
+    toast.info(
+      'Preparando voz real IA...',
+      'Sintetizando la narración de estudio para reproducirla automáticamente.'
     );
+    const synthesized = await handleGenerateNarration(narrationText, { silentToast: true });
+    if (!bgPlayingRef.current) return; // El usuario detuvo antes de terminar
+
+    if (synthesized && !synthesized.isSyntheticFallback) {
+      const started = await playTakeAudioReliably(synthesized);
+      if (started) {
+        toast.success(
+          'Reproduciendo tu Audiolibro (Voz IA)',
+          `"${videoBook.bookTitle || 'Audiolibro IA'}" está sonando ahora.`
+        );
+        return;
+      }
+    }
+
+    // 3. Último respaldo: síntesis del navegador
+    const startIdx = bgChapterIdx < videoBook.pages.length ? bgChapterIdx : 0;
+    speakBgChapter(startIdx);
   };
 
   // Opens the full VideoBookPlayer cleanly inside a modal triggered by the "Reproducir" button
   const openPlayerModal = () => {
+    // Desbloquear AudioContext en el clic exacto para que el video arranque con voz real audible
+    unlockStudioAudioContext();
     if (!hasCreatedVideoBook || !videoBook.pages || videoBook.pages.length === 0) {
       toast.info(
         'Crea tu audiolibro primero',
@@ -1007,6 +1146,14 @@ ${textoPdf || '{{texto_pdf}}'}
   useEffect(() => {
     return () => {
       bgPlayingRef.current = false;
+      if (bgWebAudioRef.current) {
+        bgWebAudioRef.current.stop();
+        bgWebAudioRef.current = null;
+      }
+      if (testVoiceHandleRef.current) {
+        testVoiceHandleRef.current.stop();
+        testVoiceHandleRef.current = null;
+      }
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
@@ -1188,6 +1335,8 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   const handleCreateVideoBookFromPdf = async (autoIllustrateAndNarrate = false) => {
+    // Desbloquear motor de audio sincrónicamente durante el gesto de creación
+    unlockStudioAudioContext();
     if (!textoPdf.trim()) {
       const msg = 'Sube primero un archivo PDF o selecciona uno de los documentos de ejemplo.';
       setVideoBookError(msg);
@@ -1861,13 +2010,14 @@ ${textoPdf || '{{texto_pdf}}'}
   const handleGenerateNarration = async (
     overrideScript?: string,
     options?: { silentToast?: boolean }
-  ) => {
+  ): Promise<VoiceoverTake | null> => {
+    unlockStudioAudioContext();
     const textToSpeak = (overrideScript ?? narrationScript).trim();
     if (!textToSpeak) {
       const msg = 'Por favor ingresa o selecciona un guion para generar la narración.';
       setNarrationError(msg);
       if (!options?.silentToast) toast.error('Texto vacío', msg);
-      return;
+      return null;
     }
 
     setIsGeneratingNarration(true);
@@ -1948,11 +2098,13 @@ ${textoPdf || '{{texto_pdf}}'}
             : `Pista de voz real (${processed.durationSec.toFixed(1)}s · 24 kHz) lista para reproducir.`
         );
       }
+      return newTake;
     } catch (err: any) {
       if (toastId) toast.dismiss(toastId);
       const errMsg = err?.message || 'Error al sintetizar la voz con IA.';
       setNarrationError(errMsg);
       if (!options?.silentToast) toast.error('Error al generar locución', errMsg);
+      return null;
     } finally {
       setIsGeneratingNarration(false);
     }
@@ -2559,7 +2711,7 @@ ${textoPdf || '{{texto_pdf}}'}
               },
               {
                 id: 'ai-pdf-creator' as const,
-                label: 'Crear PDF con IA',
+                label: 'Crear PDF Completo con IA',
                 icon: FilePlus2,
               },
               {
@@ -2744,8 +2896,23 @@ ${textoPdf || '{{texto_pdf}}'}
             </div>
           </div>
 
-          {/* Right: Always-available Background Play Button + Language Selector */}
-          <div className="flex items-center gap-2.5 shrink-0">
+          {/* Right: Crear PDF Completo con IA + Play Button + Language Selector */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveModule('ai-pdf-creator')}
+              className={`px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
+                activeModule === 'ai-pdf-creator'
+                  ? 'bg-slate-950 text-amber-400 border-amber-500/70'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
+              }`}
+              title="Crear un documento PDF completo con IA integrando texto, imágenes, voz 24kHz, subtítulos y video"
+            >
+              <FilePlus2 className={`w-3.5 h-3.5 ${activeModule === 'ai-pdf-creator' ? 'text-amber-400' : 'text-amber-700'}`} />
+              <span className="hidden sm:inline">Crear PDF Completo con IA</span>
+              <span className="sm:hidden">PDF IA</span>
+            </button>
+
             <LanguageSelector
               currentLanguage={currentLanguage}
               onLanguageChange={handleLanguageChange}
@@ -2821,6 +2988,8 @@ ${textoPdf || '{{texto_pdf}}'}
           {/* Compact Single-Row Command Bar */}
           <UnifiedActionToolbar
             onCrear={handleToolbarCrear}
+            onCrearPdfIa={() => setActiveModule('ai-pdf-creator')}
+            isAiPdfActive={activeModule === 'ai-pdf-creator'}
             onReproducir={handleToolbarReproducir}
             onCargar={handleToolbarCargar}
             onEliminar={handleToolbarEliminar}
@@ -3052,6 +3221,15 @@ ${textoPdf || '{{texto_pdf}}'}
                     <FolderOpen className="w-4 h-4" />
                     <span>2. Mi Biblioteca ({savedAudiobooks.length})</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('ai-pdf-creator')}
+                    className="px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap bg-amber-500 hover:bg-amber-600 text-slate-950"
+                  >
+                    <FilePlus2 className="w-4 h-4" />
+                    <span>3. Crear PDF Completo con IA</span>
+                  </button>
                 </div>
               </div>
 
@@ -3235,18 +3413,29 @@ ${textoPdf || '{{texto_pdf}}'}
                       </div>
                     </div>
 
-                    {/* RIGHT COLUMN (5 cols): Voice, Chapters, Style & Primary Actions */}
+                    {/* RIGHT COLUMN (5 cols): Voice, Organized Hidden Galleries & Simple Produce */}
                     <div className="lg:col-span-5 lg:border-l lg:border-slate-200 lg:pl-8 space-y-5">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <h3 className="text-base font-bold text-amber-800">
-                          02. Voz, formato y producción
+                          02. Voz, fotos y creación
                         </h3>
-                        <span className="text-xs font-mono tabular-nums text-slate-500">
-                          30 voces IA
-                        </span>
+                        <button
+                          type="button"
+                          onClick={handleTestSelectedVoice}
+                          disabled={isTestingVoice}
+                          className="px-3 py-1.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-60"
+                          title="Escuchar una muestra real de esta voz IA ahora mismo"
+                        >
+                          {isTestingVoice ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                          ) : (
+                            <Volume2 className="w-3.5 h-3.5 text-amber-700" />
+                          )}
+                          <span>{isTestingVoice ? 'Hablando...' : 'Probar Voz'}</span>
+                        </button>
                       </div>
 
-                      {/* Narrator Avatar Selector */}
+                      {/* Narrator Selector (Compacto sin saturar de fotos) */}
                       <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50/70 border border-slate-200">
                         <img
                           src={
@@ -3286,7 +3475,50 @@ ${textoPdf || '{{texto_pdf}}'}
                         </div>
                       </div>
 
-                      {/* Duration & Chapters */}
+                      {/* BOTONES DEDICADOS: Mostrar / Ocultar Fotos de Avatares y Escenas (Ocultos por defecto) */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreatorAvatars((prev) => !prev);
+                            setShowCreatorScenes(false);
+                          }}
+                          className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                            showCreatorAvatars
+                              ? 'bg-slate-950 text-amber-400 border-amber-500/60'
+                              : 'bg-white hover:bg-amber-50 text-amber-900 border-amber-200'
+                          }`}
+                        >
+                          {showCreatorAvatars ? (
+                            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <Users className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          )}
+                          <span>{showCreatorAvatars ? 'Ocultar Avatares' : 'Avatares (30)'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCreatorScenes((prev) => !prev);
+                            setShowCreatorAvatars(false);
+                          }}
+                          className={`py-2.5 px-3 rounded-xl border text-xs font-extrabold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                            showCreatorScenes
+                              ? 'bg-slate-950 text-amber-400 border-amber-500/60'
+                              : 'bg-white hover:bg-amber-50 text-amber-900 border-amber-200'
+                          }`}
+                        >
+                          {showCreatorScenes ? (
+                            <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <ImageIcon className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                          )}
+                          <span>{showCreatorScenes ? 'Ocultar Escenas' : 'Escenas (+1,200)'}</span>
+                        </button>
+                      </div>
+
+                      {/* Duration, Chapters & Visual Style — Compacto en un solo bloque */}
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <label className="text-xs font-semibold text-slate-700 block">
@@ -3321,7 +3553,6 @@ ${textoPdf || '{{texto_pdf}}'}
                         </div>
                       </div>
 
-                      {/* Visual Style */}
                       <div className="space-y-1">
                         <label className="text-xs font-semibold text-slate-700 block">
                           Estilo editorial y escenas
@@ -3351,17 +3582,17 @@ ${textoPdf || '{{texto_pdf}}'}
                           type="button"
                           onClick={() => handleCreateVideoBookFromPdf(false)}
                           disabled={isGeneratingVideoBook || isGeneratingAllPages}
-                          className="w-full py-3 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
+                          className="w-full py-3.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 text-white font-bold text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
                         >
                           {isGeneratingVideoBook ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin" />
-                              <span>Generando Audiolibro IA...</span>
+                              <span>Creando Audiolibro y Voz IA...</span>
                             </>
                           ) : (
                             <>
-                              <BookOpen className="w-4 h-4" />
-                              <span>Crear Audiolibro desde PDF</span>
+                              <BookOpen className="w-4 h-4 text-amber-400" />
+                              <span>Crear Audiolibro con Voz IA</span>
                             </>
                           )}
                         </button>
@@ -3375,7 +3606,7 @@ ${textoPdf || '{{texto_pdf}}'}
                           className="w-full py-2.5 px-4 rounded-xl bg-white hover:bg-slate-50 text-slate-900 border border-slate-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50 cursor-pointer"
                         >
                           <Sparkles className="w-4 h-4 text-amber-700" />
-                          <span>Generar Completo (Voz + Video)</span>
+                          <span>Crear Completo (Voz + Ilustraciones IA)</span>
                         </button>
 
                         {/* Botón 'Escuchar aquí' + 'Reproducir video' — Se activan SOLO cuando ya existe un audiolibro creado */}
@@ -3393,14 +3624,14 @@ ${textoPdf || '{{texto_pdf}}'}
                             }`}
                             title={
                               hasCreatedVideoBook
-                                ? 'Escuchar el audiolibro creado sin abrir la pantalla de video'
+                                ? 'Escuchar el audiolibro creado con voz real sin abrir la pantalla de video'
                                 : 'Primero crea un audiolibro desde tu PDF para poder escucharlo'
                             }
                           >
                             {isBgPlaying ? (
                               <>
                                 <Pause className="w-4 h-4 fill-current shrink-0" />
-                                <span>Pausar audio</span>
+                                <span>Pausar voz</span>
                               </>
                             ) : (
                               <>
@@ -3421,7 +3652,7 @@ ${textoPdf || '{{texto_pdf}}'}
                             }`}
                             title={
                               hasCreatedVideoBook
-                                ? 'Abrir la pantalla de reproducción de video del audiolibro creado'
+                                ? 'Abrir la pantalla de reproducción de video con subtítulos dinámicos'
                                 : 'Primero crea un audiolibro desde tu PDF para poder reproducirlo'
                             }
                           >
@@ -3441,7 +3672,7 @@ ${textoPdf || '{{texto_pdf}}'}
 
                         {!hasCreatedVideoBook && !isGeneratingVideoBook && (
                           <p className="text-[11px] text-slate-500 text-center">
-                            Pulsa <strong>Crear Audiolibro desde PDF</strong> para activar la reproducción con voz real.
+                            Pulsa <strong>Crear Audiolibro con Voz IA</strong> para activar la reproducción con voz real.
                           </p>
                         )}
 
@@ -3469,6 +3700,141 @@ ${textoPdf || '{{texto_pdf}}'}
                       </div>
                     </div>
                   </div>
+
+                  {/* PANEL DESPLEGABLE (OCULTO POR DEFECTO): GALERÍA DE 30 AVATARES */}
+                  {showCreatorAvatars && (
+                    <div className="pt-6 border-t border-slate-200 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-sm font-extrabold text-amber-800 flex items-center gap-2">
+                            <Users className="w-4 h-4 text-amber-700" />
+                            <span>Galería de 30 Avatares y Voces Narradoras</span>
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            Haz clic en cualquier avatar para seleccionarlo y luego oculta esta galería.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowCreatorAvatars(false)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <EyeOff className="w-3.5 h-3.5" />
+                          <span>Ocultar Avatares</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                        {NARRATOR_AVATAR_PRESETS.map((av) => {
+                          const isSelected = selectedAvatar.id === av.id;
+                          return (
+                            <button
+                              key={av.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedAvatar(av);
+                                setCustomAvatarUrl(undefined);
+                                setVoiceName(av.voiceName);
+                                setVoiceGender(av.gender);
+                                toast.success(
+                                  `Avatar seleccionado: ${av.name}`,
+                                  `Voz ${av.accent} asignada.`
+                                );
+                              }}
+                              className={`text-left p-2 rounded-xl border transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-400/40'
+                                  : 'bg-white hover:bg-slate-50 border-slate-200'
+                              }`}
+                            >
+                              <div className="aspect-square rounded-lg overflow-hidden bg-slate-900 mb-1.5">
+                                <img
+                                  src={av.customPhotoUrl || av.realPhotoUrl}
+                                  alt={av.name}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="text-xs font-bold text-slate-900 truncate">
+                                #{String(av.number).padStart(2, '0')} {av.name}
+                              </div>
+                              <div className="text-[10px] text-amber-800 font-semibold truncate">
+                                {av.category}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* PANEL DESPLEGABLE (OCULTO POR DEFECTO): BANCO DE +1,200 ESCENAS */}
+                  {showCreatorScenes && (
+                    <div className="pt-6 border-t border-slate-200 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h4 className="text-sm font-extrabold text-amber-800 flex items-center gap-2">
+                            <ImageIcon className="w-4 h-4 text-amber-700" />
+                            <span>Banco Organizado de +1,200 Fotos de Escenas</span>
+                          </h4>
+                          <p className="text-xs text-slate-500">
+                            Selecciona fotos por nicho para tu audiolibro o rellena todos los capítulos automáticamente.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowCreatorScenes(false)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <EyeOff className="w-3.5 h-3.5" />
+                          <span>Ocultar Escenas</span>
+                        </button>
+                      </div>
+
+                      <NicheSceneGalleryView
+                        activeChapterNumber={
+                          videoBook.pages[activeBookPageIdx]?.pageNumber || activeBookPageIdx + 1
+                        }
+                        activeChapterTitle={
+                          videoBook.pages[activeBookPageIdx]?.chapterTitle || 'Capítulo Activo'
+                        }
+                        currentChapterImageUrl={pageImages[activeBookPageIdx]}
+                        totalChapters={videoBook.pages.length}
+                        onSelectPhotoForChapter={(photo: NicheScenePhoto) => {
+                          setPageImages((prev) => ({
+                            ...prev,
+                            [activeBookPageIdx]: photo.imageUrl,
+                          }));
+                          setExportedBookMp4Url(null);
+                          toast.success(
+                            'Escena asignada',
+                            `Foto "${photo.title}" aplicada al Capítulo ${activeBookPageIdx + 1}.`
+                          );
+                        }}
+                        onAutoFillAllChaptersWithNiche={(niche?: 'Auto' | SceneNicheCategory) => {
+                          const map: Record<number, string> = {};
+                          if (!niche || niche === 'Auto') {
+                            const matched = matchBestScenesForBookPages(videoBook.pages);
+                            Object.entries(matched).forEach(([idxStr, ph]) => {
+                              map[Number(idxStr)] = ph.imageUrl;
+                            });
+                          } else {
+                            const pool = NICHE_SCENE_LIBRARY_1200.filter((p) => p.niche === niche);
+                            videoBook.pages.forEach((_, idx) => {
+                              const chosen = pool[(idx * 7) % Math.max(1, pool.length)];
+                              if (chosen) map[idx] = chosen.imageUrl;
+                            });
+                          }
+                          setPageImages((prev) => ({ ...prev, ...map }));
+                          setExportedBookMp4Url(null);
+                          toast.success(
+                            'Escenas asignadas a todos los capítulos',
+                            `Se actualizaron las fotos de ${videoBook.pages.length} capítulos.`
+                          );
+                        }}
+                      />
+                    </div>
+                  )}
                 </section>
               )}
 

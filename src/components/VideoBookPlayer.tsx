@@ -62,6 +62,12 @@ import {
 } from '../utils/nicheSceneLibrary';
 import { NicheSceneGalleryView } from './NicheSceneGalleryView';
 import { FuturisticGoldLogo } from './FuturisticGoldLogo';
+import { pcmBase64ToWav } from '../utils/audioWav';
+import {
+  unlockStudioAudioContext,
+  playBase64AudioViaWebAudio,
+  WebAudioPlaybackHandle,
+} from '../utils/audioPlayerEngine';
 
 interface VideoBookPlayerProps {
   videoBook: VideoBook;
@@ -172,8 +178,8 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     });
   };
 
-  // 30 Realistic AI Avatars Gallery State
-  const [showAvatarGallery, setShowAvatarGallery] = useState<boolean>(true);
+  // Organized & Hidden-by-Default Photo Galleries (User toggles them via dedicated buttons)
+  const [showAvatarGallery, setShowAvatarGallery] = useState<boolean>(false);
   const [selectedCategory, setSelectedCategory] = useState<'Todos' | AvatarCategory>('Todos');
   const [genderFilter, setGenderFilter] = useState<'todos' | 'femenina' | 'masculina'>('todos');
   const [avatarSearch, setAvatarSearch] = useState<string>('');
@@ -182,17 +188,24 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   const [customAiPrompt, setCustomAiPrompt] = useState<string>('');
   const [isGeneratingCustomAiAvatar, setIsGeneratingCustomAiAvatar] = useState<boolean>(false);
 
-  // 1,200+ Niche Scene Photos Library State
-  const [showSceneLibrary, setShowSceneLibrary] = useState<boolean>(true);
+  // 1,200+ Niche Scene Photos Library State (Hidden by default)
+  const [showSceneLibrary, setShowSceneLibrary] = useState<boolean>(false);
+  const [showChaptersList, setShowChaptersList] = useState<boolean>(false);
   const [selectedSceneNiche, setSelectedSceneNiche] = useState<'Todos' | SceneNicheCategory>('Todos');
   const [sceneSearchQuery, setSceneSearchQuery] = useState<string>('');
   const [visibleSceneCount, setVisibleSceneCount] = useState<number>(60);
   const [generatingScenePhotoId, setGeneratingScenePhotoId] = useState<string | null>(null);
 
-  // Portada & Typography Contrast Mode: Negro, Blanco y Neón (Ultra Contraste para máxima legibilidad)
+  // Portada & Typography Contrast Mode
   const [portadaContrastTheme, setPortadaContrastTheme] = useState<'neon-bw' | 'gold-obsidian' | 'editorial'>('neon-bw');
 
+  // Bulletproof Audio Playback State (HTML5 <audio> + WebAudio fallback + Volume)
+  const [volume, setVolume] = useState<number>(1.0);
+  const [usingWebAudioFallback, setUsingWebAudioFallback] = useState<boolean>(false);
+  const [soundBlockedHint, setSoundBlockedHint] = useState<boolean>(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const webAudioHandleRef = useRef<WebAudioPlaybackHandle | null>(null);
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
   const lastSpokenPageRef = useRef<number | null>(null);
@@ -205,40 +218,129 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
 
   const activeTake = useMemo(() => {
     if (!takes.length) return null;
-    if (!selectedTakeId) return null;
-    return takes.find((t) => t.id === selectedTakeId) || null;
+    if (selectedTakeId) {
+      const exact = takes.find((t) => t.id === selectedTakeId);
+      if (exact) return exact;
+    }
+    return takes.find((t) => !t.isSyntheticFallback && (t.wavUrl || t.audioBase64)) || null;
   }, [takes, selectedTakeId]);
 
-  // Only treat an audio take as playable WAV if it has a valid real voice URL and wasn't a synthetic beep fallback
+  // Guarantee a fresh playable Blob URL from base64 if wavUrl is missing
+  const resolvedWavUrl = useMemo(() => {
+    if (!activeTake || activeTake.isSyntheticFallback) return null;
+    if (activeTake.wavUrl) return activeTake.wavUrl;
+    if (activeTake.audioBase64 && activeTake.audioBase64.length > 64) {
+      try {
+        return pcmBase64ToWav(activeTake.audioBase64, 24000).wavUrl;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [activeTake]);
+
+  // Only treat an audio take as playable WAV if it has a valid real voice URL/base64 and wasn't a synthetic beep fallback
   const hasRealAudioTake = Boolean(
-    activeTake && activeTake.wavUrl && !activeTake.isSyntheticFallback && !audioPlayFailed
+    activeTake &&
+      !activeTake.isSyntheticFallback &&
+      (resolvedWavUrl || (activeTake.audioBase64 && activeTake.audioBase64.length > 64)) &&
+      !audioPlayFailed
   );
 
-  // Helper to safely start <audio> playback with volume unmuted
-  const startAudioElementPlayback = () => {
-    const el = audioRef.current;
-    if (!el || !hasRealAudioTake) return false;
-    el.muted = isMuted;
-    el.volume = 1.0;
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.then === 'function') {
-      playPromise
-        .then(() => {
-          pendingAutoPlayRef.current = false;
-          setIsPlaying(true);
-        })
-        .catch(() => {
-          // If browser blocks autoplay or audio fails, keep play button clearly ready or fall back to browser voice
-          pendingAutoPlayRef.current = false;
-          if (el.error) {
-            setAudioPlayFailed(true);
-            setIsPlaying(true);
-          } else {
-            setIsPlaying(false);
-          }
-        });
+  const stopWebAudioEngine = () => {
+    if (webAudioHandleRef.current) {
+      webAudioHandleRef.current.stop();
+      webAudioHandleRef.current = null;
     }
-    return true;
+    setUsingWebAudioFallback(false);
+  };
+
+  // Start real 24kHz voice via WebAudio API if <audio> is blocked or fails
+  const startWebAudioFallbackPlayback = async (offsetSec = 0): Promise<boolean> => {
+    if (!activeTake?.audioBase64) return false;
+    try {
+      stopWebAudioEngine();
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
+      const handle = await playBase64AudioViaWebAudio(activeTake.audioBase64, {
+        startOffsetSec: offsetSec,
+        volume,
+        muted: isMuted,
+        sampleRate: 24000,
+        onEnded: () => {
+          webAudioHandleRef.current = null;
+          setUsingWebAudioFallback(false);
+          setIsPlaying(false);
+        },
+      });
+      webAudioHandleRef.current = handle;
+      setAudioDuration(handle.durationSec);
+      setUsingWebAudioFallback(true);
+      setSoundBlockedHint(false);
+      pendingAutoPlayRef.current = false;
+      setIsPlaying(true);
+      return true;
+    } catch {
+      setUsingWebAudioFallback(false);
+      return false;
+    }
+  };
+
+  // Helper to safely start <audio> playback (with automatic WebAudio API fallback)
+  const startAudioElementPlayback = (overrideOffsetSec?: number) => {
+    stopWebAudioEngine();
+    const el = audioRef.current;
+    const targetOffset =
+      typeof overrideOffsetSec === 'number' ? overrideOffsetSec : currentTime;
+
+    if (el && resolvedWavUrl && hasRealAudioTake) {
+      el.muted = isMuted;
+      el.volume = isMuted ? 0 : volume;
+      if (typeof overrideOffsetSec === 'number' && Number.isFinite(overrideOffsetSec)) {
+        try {
+          el.currentTime = overrideOffsetSec;
+        } catch {
+          // Ignore seek before metadata loaded
+        }
+      }
+      const playPromise = el.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+          .then(() => {
+            pendingAutoPlayRef.current = false;
+            setSoundBlockedHint(false);
+            setIsPlaying(true);
+          })
+          .catch(async () => {
+            // HTML5 <audio> blocked or failed — immediately try unlocked WebAudio API!
+            const webOk = await startWebAudioFallbackPlayback(targetOffset);
+            if (!webOk) {
+              pendingAutoPlayRef.current = false;
+              if (el.error) {
+                setAudioPlayFailed(true);
+                setIsPlaying(true);
+              } else {
+                setSoundBlockedHint(true);
+                setIsPlaying(false);
+              }
+            }
+          });
+      }
+      return true;
+    }
+
+    if (activeTake?.audioBase64 && hasRealAudioTake) {
+      startWebAudioFallbackPlayback(targetOffset).then((ok) => {
+        if (!ok) {
+          setSoundBlockedHint(true);
+          setIsPlaying(false);
+        }
+      });
+      return true;
+    }
+
+    return false;
   };
 
   // Trigger autoplay when player modal opens via the "Reproducir" button
@@ -247,12 +349,17 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
       setCurrentTime(0);
       lastSpokenPageRef.current = null;
       setAudioPlayFailed(false);
+      setSoundBlockedHint(false);
       onPageChange(0);
-      if (hasRealAudioTake && audioRef.current) {
-        audioRef.current.currentTime = 0;
+      if (hasRealAudioTake) {
         pendingAutoPlayRef.current = true;
-        startAudioElementPlayback();
+        startAudioElementPlayback(0);
       } else {
+        // No real audio yet: trigger real Gemini TTS if not already generating
+        pendingAutoPlayRef.current = true;
+        if (!isGeneratingAudio) {
+          onGenerateBookAudio();
+        }
         setIsPlaying(true);
       }
     }
@@ -469,25 +576,27 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
         } else {
           utterance.lang = 'es-ES';
         }
-        utterance.volume = 1.0;
+        utterance.volume = volume;
         utterance.pitch = selectedAvatar.gender === 'masculina' ? 0.88 : 1.06;
         utterance.rate = 0.98;
+        window.speechSynthesis.resume();
         window.speechSynthesis.speak(utterance);
       } catch (_e) {
         // Ignore browser speech errors
       }
     }
-  }, [isPlaying, isMuted, hasRealAudioTake, activePageIdx, currentPage, selectedAvatar.gender]);
+  }, [isPlaying, isMuted, volume, hasRealAudioTake, activePageIdx, currentPage, selectedAvatar.gender]);
 
   useEffect(() => {
     return () => {
+      stopWebAudioEngine();
       if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         window.speechSynthesis.cancel();
       }
     };
   }, []);
 
-  // Reset playback ONLY when activeTake actually changes AFTER mount (prevents killing autoPlayTrigger on mount!)
+  // Reset playback ONLY when activeTake actually changes AFTER mount — auto-start if waiting for freshly synthesized voice!
   useEffect(() => {
     const currentId = activeTake?.id || null;
     if (prevTakeIdRef.current === undefined) {
@@ -496,6 +605,7 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     }
     if (prevTakeIdRef.current === currentId) return;
     prevTakeIdRef.current = currentId;
+    stopWebAudioEngine();
     setAudioPlayFailed(false);
     setAudioDuration(null);
     setCurrentTime(0);
@@ -503,29 +613,47 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
     }
-    if (isPlaying && currentId) {
+    if ((isPlaying || pendingAutoPlayRef.current) && currentId) {
       pendingAutoPlayRef.current = true;
+      // Start freshly arrived real voice immediately
+      setTimeout(() => {
+        if (pendingAutoPlayRef.current) {
+          startAudioElementPlayback(0);
+        }
+      }, 60);
     } else {
       setIsPlaying(false);
     }
   }, [activeTake?.id]);
 
-  // Keep <audio> mute state synced immediately
+  // Keep <audio> and WebAudio mute & volume synced immediately
   useEffect(() => {
+    const effectiveVol = isMuted ? 0 : volume;
     if (audioRef.current) {
       audioRef.current.muted = isMuted;
-      audioRef.current.volume = isMuted ? 0 : 1.0;
+      audioRef.current.volume = effectiveVol;
     }
-  }, [isMuted]);
+    if (webAudioHandleRef.current) {
+      webAudioHandleRef.current.setVolume(effectiveVol);
+    }
+  }, [isMuted, volume]);
 
+  // Keep currentTime progressing when using WebAudio fallback OR live fallback timer
   useEffect(() => {
-    if (!isPlaying || hasRealAudioTake) {
+    if (!isPlaying || (hasRealAudioTake && !usingWebAudioFallback)) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       lastTickRef.current = null;
       return;
     }
 
     const step = (now: number) => {
+      if (usingWebAudioFallback && webAudioHandleRef.current) {
+        const t = webAudioHandleRef.current.getCurrentTime();
+        setCurrentTime(t);
+        rafRef.current = requestAnimationFrame(step);
+        return;
+      }
+
       if (lastTickRef.current === null) {
         lastTickRef.current = now;
       }
@@ -548,29 +676,43 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, hasRealAudioTake, pageTimings.totalDuration]);
+  }, [isPlaying, hasRealAudioTake, usingWebAudioFallback, pageTimings.totalDuration]);
 
   const togglePlay = () => {
-    if (hasRealAudioTake && audioRef.current) {
-      if (isPlaying) {
-        pendingAutoPlayRef.current = false;
+    unlockStudioAudioContext();
+    setSoundBlockedHint(false);
+
+    if (isPlaying) {
+      pendingAutoPlayRef.current = false;
+      stopWebAudioEngine();
+      if (audioRef.current) {
         audioRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        if (audioRef.current.currentTime >= pageTimings.totalDuration - 0.15) {
-          audioRef.current.currentTime = 0;
-          setCurrentTime(0);
-          onPageChange(0);
-        }
-        startAudioElementPlayback();
       }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      setIsPlaying(false);
+      return;
+    }
+
+    // Starting playback
+    const atEnd = currentTime >= pageTimings.totalDuration - 0.2;
+    const startAt = atEnd ? 0 : currentTime;
+    if (atEnd) {
+      setCurrentTime(0);
+      onPageChange(0);
+      lastSpokenPageRef.current = null;
+    }
+
+    if (hasRealAudioTake) {
+      startAudioElementPlayback(startAt);
     } else {
-      if (!isPlaying && currentTime >= pageTimings.totalDuration - 0.15) {
-        setCurrentTime(0);
-        onPageChange(0);
-        lastSpokenPageRef.current = null;
+      // No real voice synthesized yet — synthesize real Gemini 24kHz voice right away!
+      pendingAutoPlayRef.current = true;
+      if (!isGeneratingAudio) {
+        onGenerateBookAudio();
       }
-      setIsPlaying((prev) => !prev);
+      setIsPlaying(true);
     }
   };
 
@@ -582,13 +724,17 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
     if (targetTiming) {
       const targetTime = targetTiming.start + 0.05;
       setCurrentTime(targetTime);
-      if (hasRealAudioTake && audioRef.current) {
+      if (usingWebAudioFallback && isPlaying) {
+        startWebAudioFallbackPlayback(targetTime);
+      } else if (hasRealAudioTake && audioRef.current) {
         audioRef.current.currentTime = targetTime;
       }
     }
   };
 
   const restartBook = () => {
+    unlockStudioAudioContext();
+    stopWebAudioEngine();
     setIsPlaying(false);
     setCurrentTime(0);
     lastSpokenPageRef.current = null;
@@ -676,13 +822,13 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
   if (!currentPage) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Hidden Audio Element when a real AI Voiceover Take exists */}
-      {hasRealAudioTake && activeTake && (
+      {hasRealAudioTake && activeTake && resolvedWavUrl && (
         <audio
           key={activeTake.id}
           ref={audioRef}
-          src={activeTake.wavUrl}
+          src={resolvedWavUrl}
           preload="auto"
           muted={isMuted}
           onLoadedMetadata={(e) => {
@@ -690,532 +836,390 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
             if (dur && Number.isFinite(dur)) setAudioDuration(dur);
           }}
           onCanPlay={() => {
-            if (pendingAutoPlayRef.current) {
-              startAudioElementPlayback();
+            if (pendingAutoPlayRef.current && !usingWebAudioFallback) {
+              startAudioElementPlayback(currentTime);
             }
           }}
           onError={() => {
-            pendingAutoPlayRef.current = false;
-            setAudioPlayFailed(true);
+            if (activeTake.audioBase64 && isPlaying) {
+              startWebAudioFallbackPlayback(currentTime);
+            } else {
+              pendingAutoPlayRef.current = false;
+              setAudioPlayFailed(true);
+            }
           }}
-          onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+          onTimeUpdate={(e) => {
+            if (!usingWebAudioFallback) {
+              setCurrentTime(e.currentTarget.currentTime);
+            }
+          }}
           onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
+          onPause={() => {
+            if (!usingWebAudioFallback) setIsPlaying(false);
+          }}
           onEnded={() => setIsPlaying(false)}
         />
       )}
 
       {/* =====================================================================
-          30 REAL AI AVATARS STUDIO CAST SELECTOR & GEMINI 3.1 GENERATOR
+          CLEAN ORGANIZED PLAYER TOOLBAR — AVATARS & SCENES HIDDEN BEHIND BUTTONS
          ===================================================================== */}
-      <div className="bg-[#11131A] border border-slate-800/90 rounded-md p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3.5">
-            <div className="relative w-12 h-12 rounded-md overflow-hidden border-2 border-amber-500 shrink-0 bg-slate-900">
-              <img
-                src={activeAvatarPhotoUrl}
-                alt={selectedAvatar.name}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-              <span className="absolute bottom-0 right-0 px-1 bg-amber-500 text-slate-950 font-mono text-[9px] font-bold">
-                #{selectedAvatar.number}
-              </span>
-            </div>
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-[10px] font-mono uppercase tracking-wider text-amber-300 font-semibold">
-                  30 AVATARES REALES CON LO MÁS NUEVO IA · GEMINI 3.1 LIVE
-                </span>
-                <span className="text-[11px] font-mono text-emerald-400">
-                  ● Activo: #{selectedAvatar.number} {selectedAvatar.name} ({selectedAvatar.accent})
-                </span>
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Active Audiobook + Narrator Identity */}
+          <div className="flex items-center gap-3 min-w-0">
+            <img
+              src={activeAvatarPhotoUrl}
+              alt={selectedAvatar.name}
+              referrerPolicy="no-referrer"
+              className="w-11 h-11 rounded-xl object-cover border border-amber-300 shrink-0 bg-slate-900"
+            />
+            <div className="min-w-0">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-amber-800 truncate">
+                Narrador #{selectedAvatar.number}: {selectedAvatar.name} · Voz {selectedAvatar.voiceName} · {pages.length} capítulos
               </div>
-              <h3 className="font-display text-base sm:text-lg font-bold text-white mt-0.5">
-                {selectedAvatar.role} · Voz IA {selectedAvatar.voiceName} ({selectedAvatar.ageRange})
-              </h3>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleGenerateAiPortraitForAvatar(selectedAvatar)}
-              disabled={generatingAvatarId === selectedAvatar.id}
-              className="px-3.5 py-2 rounded bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 text-amber-300 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {generatingAvatarId === selectedAvatar.id ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Generando Retrato IA 4K...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Regenerar Rostro con IA Nueva (Gemini 3.1)</span>
-                </>
-              )}
-            </button>
-
-            <label className="px-3 py-2 rounded bg-[#171A24] hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors">
-              <Upload className="w-3.5 h-3.5 text-amber-400" />
-              <span>{customAvatarUrl ? 'Cambiar Foto Real' : 'Subir Tu Foto Real'}</span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleAvatarPhotoUpload}
-                className="hidden"
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setShowAvatarGallery((prev) => !prev)}
-              className="px-3.5 py-2 rounded bg-[#181C26] hover:bg-slate-800 border border-slate-700 text-xs font-medium text-slate-200 flex items-center gap-1.5 cursor-pointer"
-            >
-              <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span>{showAvatarGallery ? 'Ocultar 30 Avatares' : 'Ver los 30 Avatares Reales'}</span>
-              {showAvatarGallery ? (
-                <ChevronUp className="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5" />
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Expandable 30 Realistic Avatars Cast Grid */}
-        {showAvatarGallery && (
-          <div className="pt-4 border-t border-slate-800/90 space-y-4">
-            {/* Filters Bar: Category + Gender + Search */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategory('Todos')}
-                  className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                    selectedCategory === 'Todos'
-                      ? 'bg-amber-500 text-slate-950 font-semibold'
-                      : 'bg-[#161923] text-slate-300 hover:text-white border border-slate-800'
-                  }`}
-                >
-                  Todos (30)
-                </button>
-                {AVATAR_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors cursor-pointer ${
-                      selectedCategory === cat
-                        ? 'bg-amber-500 text-slate-950 font-semibold'
-                        : 'bg-[#161923] text-slate-300 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center bg-[#141720] border border-slate-800 rounded p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('todos')}
-                    className={`px-2 py-1 rounded cursor-pointer ${
-                      genderFilter === 'todos'
-                        ? 'bg-slate-800 text-amber-300 font-medium'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Todos
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('femenina')}
-                    className={`px-2 py-1 rounded cursor-pointer ${
-                      genderFilter === 'femenina'
-                        ? 'bg-slate-800 text-amber-300 font-medium'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    15 Femeninas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGenderFilter('masculina')}
-                    className={`px-2 py-1 rounded cursor-pointer ${
-                      genderFilter === 'masculina'
-                        ? 'bg-slate-800 text-amber-300 font-medium'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    15 Masculinos
-                  </button>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={avatarSearch}
-                    onChange={(e) => setAvatarSearch(e.target.value)}
-                    placeholder="Buscar por nombre, país, voz..."
-                    className="pl-8 pr-3 py-1 rounded bg-[#141720] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-amber-500 w-52"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 30 Real AI Avatars Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-2.5 max-h-[340px] overflow-y-auto pr-1">
-              {filteredAvatars.map((av) => {
-                const isSelected = selectedAvatar.id === av.id;
-                const portraitSrc =
-                  aiGeneratedPortraits[av.id] || av.customPhotoUrl || av.realPhotoUrl;
-                const isGeneratingThis = generatingAvatarId === av.id;
-
-                return (
-                  <div
-                    key={av.id}
-                    onClick={() => onSelectAvatar(av)}
-                    className={`group rounded-md border p-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
-                      isSelected
-                        ? 'bg-[#1A1F2E] border-amber-500 shadow-lg ring-1 ring-amber-500/40'
-                        : 'bg-[#0D1017] border-slate-800/90 hover:border-slate-600'
-                    }`}
-                  >
-                    <div className="space-y-1.5">
-                      <div className="relative h-24 w-full rounded overflow-hidden bg-slate-900 border border-slate-800">
-                        <img
-                          src={portraitSrc}
-                          alt={av.name}
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-transparent to-transparent" />
-                        <span className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-slate-950/85 border border-slate-700 text-[9px] font-mono font-bold text-amber-400">
-                          #{String(av.number).padStart(2, '0')}
-                        </span>
-                        <span
-                          className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-slate-950/85 text-[9px] font-mono text-slate-200"
-                          style={{ borderLeft: `2px solid ${av.accentColor}` }}
-                        >
-                          {av.voiceName}
-                        </span>
-                        <div className="absolute bottom-1 left-1.5 right-1.5 flex items-center justify-between">
-                          <span className="text-[9px] font-mono text-emerald-300 truncate">
-                            {av.accent.replace('Español ', '')}
-                          </span>
-                          {isSelected && (
-                            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                          )}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-bold text-slate-100 truncate">{av.name}</div>
-                        <div className="text-[10px] text-slate-400 line-clamp-1">{av.role}</div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleGenerateAiPortraitForAvatar(av);
-                      }}
-                      disabled={isGeneratingThis}
-                      className="w-full py-1 px-1.5 rounded bg-[#151924] hover:bg-slate-800 border border-slate-800 text-[10px] font-mono text-amber-300 flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                      title="Generar nuevo retrato realista con Gemini 3.1 Flash Image"
-                    >
-                      {isGeneratingThis ? (
-                        <>
-                          <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                          <span>Creando IA...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Sparkles className="w-2.5 h-2.5" />
-                          <span>Foto IA 3.1</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Custom AI Avatar Generator Bar */}
-            <form
-              onSubmit={handleGenerateCustomPromptAvatar}
-              className="bg-[#0B0E15] border border-slate-800/90 rounded p-3 flex flex-wrap items-center justify-between gap-3"
-            >
-              <div className="flex items-center gap-2 text-xs text-slate-300">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="font-semibold text-white">
-                  Diseñar Avatar Real a Medida (Gemini 3.1 IA):
-                </span>
-              </div>
-              <div className="flex-1 min-w-[240px] flex items-center gap-2">
-                <input
-                  type="text"
-                  value={customAiPrompt}
-                  onChange={(e) => setCustomAiPrompt(e.target.value)}
-                  placeholder="Ej: Narrador de 40 años en estudio de cine con traje oscuro, barba e iluminación cálida..."
-                  className="flex-1 rounded bg-[#141824] border border-slate-800 px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-                />
-                <button
-                  type="submit"
-                  disabled={!customAiPrompt.trim() || isGeneratingCustomAiAvatar}
-                  className="px-3.5 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer shrink-0"
-                >
-                  {isGeneratingCustomAiAvatar ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Generando Avatar Real...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Wand2 className="w-3.5 h-3.5" />
-                      <span>Crear Rostro Real IA</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-      </div>
-
-      {/* =====================================================================
-          1,200+ NICHE SCENE PHOTOS LIBRARY (12 NICHOS × 100 FOTOS = 1,200 HD)
-         ===================================================================== */}
-      <NicheSceneGalleryView
-        activeChapterNumber={currentPage.pageNumber}
-        activeChapterTitle={currentPage.chapterTitle}
-        currentChapterImageUrl={currentImage}
-        totalChapters={pages.length}
-        onSelectPhotoForChapter={handleSelectScenePhotoForActiveChapter}
-        onAutoFillAllChaptersWithNiche={handleAutoFillBookFrom1200Library}
-        onGenerateAiVariantForPhoto={handleGenerateAiVariantForNichePhoto}
-        generatingPhotoId={generatingScenePhotoId}
-      />
-
-      {/* Top Studio Control Bar: Visual Mode Selector + 1-Click Actions */}
-      <div className="bg-[#11131A] border border-slate-800/90 rounded-md p-4 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <FuturisticGoldLogo size="sm" showWordmark={false} />
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-extrabold flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-400" />
-                  MODELO FUTURISTA · {pages.length} CAPÍTULOS
-                </span>
-                <span className="text-xs font-mono text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-amber-300 font-bold">
-                  Avatar #{selectedAvatar.number}: {selectedAvatar.name} ({selectedAvatar.voiceName})
-                </span>
-                <span className="text-xs font-mono text-slate-600">·</span>
-                <span className="text-[11px] font-mono text-amber-200/90">
-                  {illustratedCount}/{pages.length} escenas en oro
-                </span>
-              </div>
-              <h2 className="font-display text-lg sm:text-2xl font-black bg-gradient-to-r from-[#FFF6CC] via-[#FBBF24] to-[#D97706] bg-clip-text text-transparent leading-tight drop-shadow-[0_2px_8px_rgba(245,158,11,0.25)]">
+              <h2 className="font-display text-base sm:text-lg font-extrabold text-slate-950 truncate">
                 {videoBook.bookTitle}
               </h2>
             </div>
           </div>
 
-          {/* 1-Click Audiobook Generation, MP4 Export & PayPal Monetization Buttons */}
-          <div className="flex flex-wrap items-center gap-2.5">
+          {/* Dedicated Organizer Toggle Buttons: Avatares, Escenas, Capítulos, Voz IA & MP4 */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={onGenerateAllPageImages}
-              disabled={isGeneratingAllPages || generatingPageIdx !== null}
-              className="px-4 py-2.5 rounded-lg bg-[#0070BA] hover:bg-[#005EA6] text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
+              onClick={() => {
+                setShowAvatarGallery((prev) => !prev);
+                setShowSceneLibrary(false);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                showAvatarGallery
+                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                  : 'bg-white hover:bg-amber-50 text-slate-800 border-slate-300'
+              }`}
             >
-              {isGeneratingAllPages ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  <span>Creando Escenas con IA...</span>
-                </>
-              ) : (
-                <>
-                  <ImageIcon className="w-3.5 h-3.5 text-white" />
-                  <span>1. Generar Escenas IA Nuevas</span>
-                </>
-              )}
+              <Users className="w-3.5 h-3.5" />
+              <span>{showAvatarGallery ? 'Ocultar Avatares (30)' : 'Mostrar Avatares (30)'}</span>
             </button>
 
             <button
               type="button"
-              onClick={onGenerateBookAudio}
+              onClick={() => {
+                setShowSceneLibrary((prev) => !prev);
+                setShowAvatarGallery(false);
+              }}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                showSceneLibrary
+                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                  : 'bg-white hover:bg-amber-50 text-slate-800 border-slate-300'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>{showSceneLibrary ? 'Ocultar Escenas (+1,200)' : 'Mostrar Escenas (+1,200)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowChaptersList((prev) => !prev)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                showChaptersList
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>{showChaptersList ? 'Ocultar Capítulos' : `Capítulos (${pages.length})`}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                unlockStudioAudioContext();
+                pendingAutoPlayRef.current = true;
+                onGenerateBookAudio();
+              }}
               disabled={isGeneratingAudio}
-              className="px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 cursor-pointer whitespace-nowrap"
             >
               {isGeneratingAudio ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                  <span>Grabando Voz del Audiolibro...</span>
-                </>
-              ) : (
-                <>
-                  <Mic className="w-3.5 h-3.5 text-white" />
-                  <span>
-                    {activeTake
-                      ? 'Regenerar Voz IA Completa'
-                      : '2. Hablar Audiolibro Completo (Voz IA)'}
-                  </span>
-                </>
-              )}
-            </button>
-
-            {/* Botón de Configuración Avanzada de Exportación (Bitrate & Códec H.264 / H.265) */}
-            <button
-              type="button"
-              onClick={() => setIsExportSettingsOpen(true)}
-              className="px-3.5 py-2.5 rounded-lg bg-[#141824] hover:bg-[#1a2030] border border-amber-400/50 hover:border-amber-400 text-slate-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-              title="Ajustar bitrate y códec H.264 o H.265 para optimizar el tamaño del archivo"
-            >
-              <Sliders className="w-3.5 h-3.5 text-amber-400" />
-              <span>Ajustes MP4</span>
-              <span className="px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono text-[10px] font-black uppercase">
-                {videoExportSettings.codec.toUpperCase()} · {(videoExportSettings.videoBitrateKbps / 1000).toFixed(1)}M
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => onExportMp4(videoExportSettings)}
-              disabled={isExportingMp4}
-              className="px-4 py-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-2 shadow-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer"
-            >
-              {isExportingMp4 ? (
-                <>
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Renderizando MP4 ({mp4Progress}%)...</span>
+                  <span>Generando Voz IA...</span>
                 </>
               ) : (
                 <>
-                  <Film className="w-3.5 h-3.5" />
-                  <span>3. Descargar Audiolibro (.MP4)</span>
+                  <Mic className="w-3.5 h-3.5" />
+                  <span>{hasRealAudioTake ? 'Regenerar Voz IA' : 'Generar Voz IA'}</span>
                 </>
               )}
             </button>
 
-            {onSellWithPayPal && (
+            <select
+              value={visualMode}
+              onChange={(e) => onVisualModeChange(e.target.value as AudiobookVisualMode)}
+              className="rounded-xl bg-slate-50 border border-slate-300 px-2.5 py-2 text-xs font-bold text-slate-800 focus:outline-none focus:border-amber-500 cursor-pointer"
+              title="Modo visual del video"
+            >
+              <option value="avatar-and-scenes">Vista: Avatar + Escenas</option>
+              <option value="avatar-only">Vista: Solo Avatar</option>
+              <option value="scenes-only">Vista: Solo Escenas</option>
+            </select>
+          </div>
+        </div>
+
+        {/* If browser blocked autoplay inside iframe, show a prominent 1-click Sound Unlock Bar */}
+        {soundBlockedHint && (
+          <div className="rounded-xl bg-amber-50 border border-amber-300 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-bold text-amber-950">
+              Tu navegador bloqueó el inicio automático del sonido. Pulsa el botón para escuchar la voz real ahora:
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                unlockStudioAudioContext();
+                setIsMuted(false);
+                setSoundBlockedHint(false);
+                startAudioElementPlayback(currentTime);
+              }}
+              className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Volume2 className="w-3.5 h-3.5" />
+              <span>Activar Sonido Ahora</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* =====================================================================
+          COLLAPSIBLE DRAWER 1: 30 AVATARES REALES (Hidden by default until clicked)
+         ===================================================================== */}
+      {showAvatarGallery && (
+        <div className="bg-[#11131A] border border-amber-500/40 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-display text-base font-bold text-white">
+                Elegir Narrador y Avatar Real (30 Avatares IA)
+              </h3>
+              <p className="text-xs text-slate-400">
+                Activo: #{selectedAvatar.number} {selectedAvatar.name} · {selectedAvatar.accent}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={onSellWithPayPal}
-                className="px-4 py-2.5 rounded-xl bg-[#FFC439] hover:bg-[#F2B729] text-[#003087] font-extrabold text-xs flex items-center gap-1.5 shadow-sm hover:shadow-md transition-all cursor-pointer"
+                onClick={() => handleGenerateAiPortraitForAvatar(selectedAvatar)}
+                disabled={generatingAvatarId === selectedAvatar.id}
+                className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <span>Suscríbete ahora</span>
+                {generatingAvatarId === selectedAvatar.id ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
+                <span>Regenerar Rostro IA</span>
               </button>
-            )}
-          </div>
-        </div>
 
-        {/* Visual Presentation Mode Switcher */}
-        <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-mono text-slate-400 mr-1 flex items-center gap-1">
-              <Eye className="w-3.5 h-3.5 text-amber-400" />
-              VISTA DEL AUDIOLIBRO:
+              <label className="px-3 py-1.5 rounded-lg bg-[#171A24] hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 flex items-center gap-1.5 cursor-pointer">
+                <Upload className="w-3.5 h-3.5 text-amber-400" />
+                <span>Subir Foto</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarPhotoUpload}
+                  className="hidden"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setShowAvatarGallery(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold cursor-pointer"
+              >
+                Ocultar
+              </button>
+            </div>
+          </div>
+
+          {/* Filters Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('Todos')}
+                className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${
+                  selectedCategory === 'Todos'
+                    ? 'bg-amber-500 text-slate-950 font-semibold'
+                    : 'bg-[#161923] text-slate-300 border border-slate-800'
+                }`}
+              >
+                Todos (30)
+              </button>
+              {AVATAR_CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-2.5 py-1 rounded text-xs font-medium cursor-pointer ${
+                    selectedCategory === cat
+                      ? 'bg-amber-500 text-slate-950 font-semibold'
+                      : 'bg-[#161923] text-slate-300 border border-slate-800'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-[#141720] border border-slate-800 rounded p-0.5 text-xs">
+                {(['todos', 'femenina', 'masculina'] as const).map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGenderFilter(g)}
+                    className={`px-2 py-1 rounded cursor-pointer ${
+                      genderFilter === g
+                        ? 'bg-slate-800 text-amber-300 font-medium'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {g === 'todos' ? 'Todos' : g === 'femenina' ? 'Femeninas' : 'Masculinos'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={avatarSearch}
+                  onChange={(e) => setAvatarSearch(e.target.value)}
+                  placeholder="Buscar avatar..."
+                  className="pl-8 pr-3 py-1 rounded bg-[#141720] border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-amber-500 w-44"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 30 Real AI Avatars Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-6 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
+            {filteredAvatars.map((av) => {
+              const isSelected = selectedAvatar.id === av.id;
+              const portraitSrc =
+                aiGeneratedPortraits[av.id] || av.customPhotoUrl || av.realPhotoUrl;
+              const isGeneratingThis = generatingAvatarId === av.id;
+
+              return (
+                <div
+                  key={av.id}
+                  onClick={() => onSelectAvatar(av)}
+                  className={`group rounded-lg border p-2 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                    isSelected
+                      ? 'bg-[#1A1F2E] border-amber-500 ring-1 ring-amber-500/40'
+                      : 'bg-[#0D1017] border-slate-800/90 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="space-y-1.5">
+                    <div className="relative h-24 w-full rounded overflow-hidden bg-slate-900 border border-slate-800">
+                      <img
+                        src={portraitSrc}
+                        alt={av.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                      <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded bg-slate-950/85 text-[9px] font-mono font-bold text-amber-400">
+                        #{String(av.number).padStart(2, '0')}
+                      </span>
+                      <span className="absolute top-1 right-1 px-1.5 py-0.5 rounded bg-slate-950/85 text-[9px] font-mono text-slate-200">
+                        {av.voiceName}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-slate-100 truncate">{av.name}</div>
+                      <div className="text-[10px] text-slate-400 line-clamp-1">{av.role}</div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleGenerateAiPortraitForAvatar(av);
+                    }}
+                    disabled={isGeneratingThis}
+                    className="w-full py-1 px-1.5 rounded bg-[#151924] hover:bg-slate-800 border border-slate-800 text-[10px] font-mono text-amber-300 flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    {isGeneratingThis ? (
+                      <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-2.5 h-2.5" />
+                    )}
+                    <span>{isGeneratingThis ? 'Creando...' : 'Foto IA'}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Custom AI Avatar Generator Bar */}
+          <form
+            onSubmit={handleGenerateCustomPromptAvatar}
+            className="bg-[#0B0E15] border border-slate-800/90 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3"
+          >
+            <span className="text-xs font-semibold text-white">Diseñar Avatar con IA:</span>
+            <div className="flex-1 min-w-[220px] flex items-center gap-2">
+              <input
+                type="text"
+                value={customAiPrompt}
+                onChange={(e) => setCustomAiPrompt(e.target.value)}
+                placeholder="Describe tu narrador ideal..."
+                className="flex-1 rounded bg-[#141824] border border-slate-800 px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="submit"
+                disabled={!customAiPrompt.trim() || isGeneratingCustomAiAvatar}
+                className="px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shrink-0"
+              >
+                {isGeneratingCustomAiAvatar ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5" />
+                )}
+                <span>Crear Avatar</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* =====================================================================
+          COLLAPSIBLE DRAWER 2: +1,200 ESCENAS POR NICHOS (Hidden by default until clicked)
+         ===================================================================== */}
+      {showSceneLibrary && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-4 py-2">
+            <span className="text-xs font-bold text-amber-950">
+              Galería de +1,200 Escenas por Nichos (haz clic en cualquier foto para asignarla al Capítulo {currentPage.pageNumber})
             </span>
             <button
               type="button"
-              onClick={() => onVisualModeChange('avatar-and-scenes')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                visualMode === 'avatar-and-scenes'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'bg-[#171A24] text-slate-300 hover:text-white border border-slate-800'
-              }`}
+              onClick={() => setShowSceneLibrary(false)}
+              className="px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold cursor-pointer"
             >
-              Avatar Real Hablando + Escenas del Nicho
-            </button>
-            <button
-              type="button"
-              onClick={() => onVisualModeChange('avatar-only')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                visualMode === 'avatar-only'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'bg-[#171A24] text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              Avatar Real en Estudio (Pantalla Completa)
-            </button>
-            <button
-              type="button"
-              onClick={() => onVisualModeChange('scenes-only')}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer ${
-                visualMode === 'scenes-only'
-                  ? 'bg-amber-500 text-slate-950 font-semibold'
-                  : 'bg-[#171A24] text-slate-300 hover:text-white border border-slate-800'
-              }`}
-            >
-              Solo Escenas del Texto
+              Ocultar Escenas
             </button>
           </div>
-
-          <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
-            <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>
-              30 Avatares Reales · +1,200 Fotos de Nichos
-            </span>
-          </div>
+          <NicheSceneGalleryView
+            activeChapterNumber={currentPage.pageNumber}
+            activeChapterTitle={currentPage.chapterTitle}
+            currentChapterImageUrl={currentImage}
+            totalChapters={pages.length}
+            onSelectPhotoForChapter={handleSelectScenePhotoForActiveChapter}
+            onAutoFillAllChaptersWithNiche={handleAutoFillBookFrom1200Library}
+            onGenerateAiVariantForPhoto={handleGenerateAiVariantForNichePhoto}
+            generatingPhotoId={generatingScenePhotoId}
+          />
         </div>
-
-        {/* Portada & Typography Style: Negro, Blanco y Neón (Ultra Contraste para que resalten las letras más) */}
-        <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] font-mono font-bold text-amber-400 mr-1 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              ESTILO DE PORTADA & LETRAS:
-            </span>
-            <button
-              type="button"
-              onClick={() => setPortadaContrastTheme('neon-bw')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                portadaContrastTheme === 'neon-bw'
-                  ? 'bg-black text-white border-2 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.5)] ring-1 ring-amber-400'
-                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
-              }`}
-            >
-              <span className="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_6px_#fbbf24]" />
-              <span>Negro, Blanco y Neón (Ultra Contraste)</span>
-              <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1 rounded">Recomendado</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPortadaContrastTheme('gold-obsidian')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                portadaContrastTheme === 'gold-obsidian'
-                  ? 'bg-[#0B0E17] text-amber-300 border-2 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)]'
-                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
-              }`}
-            >
-              <span>✨ Oro 24K & Obsidiana</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPortadaContrastTheme('editorial')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                portadaContrastTheme === 'editorial'
-                  ? 'bg-white text-slate-900 border-2 border-indigo-600 shadow-xs'
-                  : 'bg-[#12151E] text-slate-300 hover:text-white border border-slate-700'
-              }`}
-            >
-              <span>📄 Clásico Editorial Blanco</span>
-            </button>
-          </div>
-          <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Letras con máxima legibilidad y halo neón activo</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* Main Open Video-Audiobook Stage (Left: Scene & Talking Avatar | Right: Synchronized Spoken Book Text) */}
       <div
@@ -1778,34 +1782,52 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
 
-            <button
-              type="button"
-              onClick={() => setIsMuted((m) => !m)}
-              className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                portadaContrastTheme === 'neon-bw'
-                  ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white shadow-[0_0_8px_rgba(251,191,36,0.2)]'
-                  : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-300'
-              }`}
-              title={isMuted ? 'Activar voz' : 'Silenciar voz'}
-            >
-              {isMuted ? (
-                <VolumeX className="w-3.5 h-3.5 text-rose-400" />
-              ) : (
-                <Volume2 className="w-3.5 h-3.5 text-amber-400" />
-              )}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  unlockStudioAudioContext();
+                  setIsMuted((m) => !m);
+                }}
+                className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                  portadaContrastTheme === 'neon-bw'
+                    ? 'bg-black hover:bg-slate-900 border-amber-400/60 text-white'
+                    : 'bg-[#141720] hover:bg-slate-800 border-slate-800 text-slate-300'
+                }`}
+                title={isMuted ? 'Activar voz' : 'Silenciar voz'}
+              >
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-3.5 h-3.5 text-rose-400" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                )}
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={isMuted ? 0 : Math.round(volume * 100)}
+                onChange={(e) => {
+                  const v = Number(e.target.value) / 100;
+                  setVolume(v);
+                  if (v > 0 && isMuted) setIsMuted(false);
+                }}
+                title="Volumen de la voz"
+                className="w-16 sm:w-20 accent-amber-400 cursor-pointer"
+              />
+            </div>
 
             <span
               className={`text-xs font-mono font-bold ${
                 portadaContrastTheme === 'neon-bw'
-                  ? 'text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'
+                  ? 'text-white'
                   : 'text-slate-400'
               }`}
             >
               {formatSec(currentTime)} / {formatSec(pageTimings.totalDuration)}
             </span>
 
-            {/* Live Audio Source Status Indicator */}
+            {/* Live Audio Source Status */}
             <span
               className={`text-[11px] font-bold px-2.5 py-1 rounded border ${
                 isGeneratingAudio
@@ -1816,10 +1838,10 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
               }`}
             >
               {isGeneratingAudio
-                ? 'Sintetizando voz IA...'
+                ? 'Sintetizando voz IA 24kHz...'
                 : hasRealAudioTake
                   ? `Voz IA · ${activeTake?.voiceName || 'Estudio'}`
-                  : 'Voz en vivo activa'}
+                  : 'Listo para sintetizar voz'}
             </span>
 
             {takes.length > 1 && (
@@ -1918,272 +1940,295 @@ export const VideoBookPlayer: React.FC<VideoBookPlayerProps> = ({
           </div>
         </div>
 
-        {/* Dynamic Subtitles Studio Controls Bar (Size, Color, Position & .SRT Export) */}
-        <div className="px-5 py-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() =>
-                handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
-              }
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
-                subtitleSettings.enabled
-                  ? 'bg-amber-500 text-slate-950 border-amber-600'
-                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-              }`}
-            >
-              <Subtitles className="w-3.5 h-3.5" />
-              <span>
-                Subtítulos Dinámicos: {subtitleSettings.enabled ? 'Activos' : 'Ocultos'}
-              </span>
-            </button>
-
-            <span className="text-xs text-slate-500 font-mono tabular-nums">
-              {dynamicSubtitles.length} bloques sincronizados
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Subtitle Size Selector */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-semibold text-slate-600 mr-1">Tamaño:</span>
-              {(
-                [
-                  { id: 'sm', label: 'Pequeño' },
-                  { id: 'md', label: 'Mediano' },
-                  { id: 'lg', label: 'Grande' },
-                  { id: 'xl', label: 'XL' },
-                ] as Array<{ id: DynamicSubtitleSize; label: string }>
-              ).map((sz) => (
-                <button
-                  key={sz.id}
-                  type="button"
-                  onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
-                  className={`px-2 py-1 rounded-md text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
-                    subtitleSettings.size === sz.id
-                      ? 'bg-amber-600 text-white border-amber-700'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
-                  }`}
-                >
-                  {sz.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Subtitle Color Swatches + Custom Color Picker */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-semibold text-slate-600">Color:</span>
-              {SUBTITLE_COLOR_PRESETS.map((preset) => (
-                <button
-                  key={preset.hex}
-                  type="button"
-                  onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
-                  title={preset.label}
-                  className={`w-5 h-5 rounded-full border-2 transition-transform cursor-pointer ${
-                    subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
-                      ? 'border-amber-600 scale-110 ring-2 ring-amber-300'
-                      : 'border-slate-300 hover:scale-105'
-                  }`}
-                  style={{ backgroundColor: preset.hex }}
-                />
-              ))}
-              <label
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer hover:border-amber-400"
-                title="Elegir color personalizado"
-              >
-                <input
-                  type="color"
-                  value={subtitleSettings.textColor}
-                  onChange={(e) =>
-                    handleUpdateSubtitleSettings({ textColor: e.target.value })
-                  }
-                  className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent p-0"
-                />
-                <span>Otro</span>
-              </label>
-            </div>
-
-            {/* Subtitle Position */}
-            <div className="flex items-center gap-1">
-              <span className="text-xs font-semibold text-slate-600 mr-0.5">Posición:</span>
-              {(
-                [
-                  { id: 'bottom', label: 'Abajo' },
-                  { id: 'center', label: 'Centro' },
-                  { id: 'top', label: 'Arriba' },
-                ] as Array<{ id: DynamicSubtitlePosition; label: string }>
-              ).map((pos) => (
-                <button
-                  key={pos.id}
-                  type="button"
-                  onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
-                  className={`px-2 py-1 rounded-md text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
-                    subtitleSettings.position === pos.id
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
-                  }`}
-                >
-                  {pos.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Download .SRT File */}
-            <button
-              type="button"
-              onClick={() =>
-                exportDynamicSubtitlesAsSrt(
-                  dynamicSubtitles,
-                  videoBook.bookTitle || 'audiolibro-subtitulos'
-                )
-              }
-              disabled={dynamicSubtitles.length === 0}
-              className="px-2.5 py-1 rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
-              title="Descargar archivo de subtítulos sincronizados (.SRT)"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>.SRT</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Chapter Strip of All Scenes & Chapters in the Spoken Audiobook + Add Unlimited Chapters */}
-      <div className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-base font-bold text-slate-950">
-            Capítulos y Escenas del Audiolibro ({pages.length} Capítulos · Duración Total:{' '}
-            {formatSec(pageTimings.totalDuration)} · Sin Límite de Tiempo)
-          </h3>
-          {onAddUnlimitedChapter && (
-            <button
-              type="button"
-              onClick={onAddUnlimitedChapter}
-              className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm flex items-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>+ Añadir Nuevo Capítulo / Escena (Sin Límite)</span>
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          {pages.map((p, idx) => {
-            const isCurrent = idx === activePageIdx;
-            const img = pageImages[idx];
-            return (
-              <div
-                key={p.pageNumber}
-                onClick={() => jumpToPage(idx)}
-                className={`group rounded-xl border p-3.5 transition-all cursor-pointer flex flex-col justify-between gap-2.5 ${
-                  portadaContrastTheme === 'neon-bw'
-                    ? isCurrent
-                      ? 'bg-black border-2 border-amber-400 ring-2 ring-amber-400/40 shadow-[0_0_20px_rgba(251,191,36,0.45)]'
-                      : 'bg-[#05070B] border border-amber-400/50 hover:border-amber-400 hover:shadow-[0_0_15px_rgba(251,191,36,0.3)]'
-                    : isCurrent
-                    ? 'bg-white border-indigo-600 ring-2 ring-indigo-600/20 shadow-md'
-                    : 'bg-white border-slate-200 hover:border-slate-400 shadow-2xs'
+        {/* Dedicated Bottom Section: Configuración Instantánea de Subtítulos Dinámicos (Color, Tamaño de Fuente y Opacidad del Fondo) */}
+        <div className="px-5 py-4 bg-white border-t border-slate-200 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() =>
+                  handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
+                }
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors cursor-pointer whitespace-nowrap ${
+                  subtitleSettings.enabled
+                    ? 'bg-amber-500 text-slate-950 border-amber-600'
+                    : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
                 }`}
               >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono font-bold">
-                    <span
-                      className={
-                        portadaContrastTheme === 'neon-bw'
-                          ? isCurrent
-                            ? 'text-amber-300 font-black drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]'
-                            : 'text-amber-400 font-bold'
-                          : isCurrent
-                          ? 'text-indigo-700'
-                          : 'text-slate-700'
-                      }
-                    >
-                      CAPÍTULO {p.pageNumber}
-                    </span>
-                    <span
-                      className={
-                        portadaContrastTheme === 'neon-bw' ? 'text-slate-300 font-mono' : 'text-slate-600'
-                      }
-                    >
-                      {p.durationSec}s
-                    </span>
-                  </div>
+                <Subtitles className="w-3.5 h-3.5" />
+                <span>
+                  Configuración de Subtítulos: {subtitleSettings.enabled ? 'Activos' : 'Ocultos'}
+                </span>
+              </button>
 
-                  {/* Mini Thumbnail Preview */}
-                  <div
-                    className={`h-24 w-full rounded-lg overflow-hidden border relative flex items-center justify-center ${
-                      portadaContrastTheme === 'neon-bw'
-                        ? 'border-amber-400/40 bg-black'
-                        : 'border-slate-200'
-                    }`}
-                    style={{
-                      background: `linear-gradient(135deg, ${p.primaryHex} 0%, ${p.secondaryHex} 100%)`,
-                    }}
-                  >
-                    {img ? (
-                      <img
-                        src={img}
-                        alt={p.chapterTitle}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <span className="text-xs font-mono text-white px-2 text-center">
-                        Escena lista para generar
-                      </span>
-                    )}
-                  </div>
+              <span className="text-xs text-slate-500 font-mono tabular-nums">
+                {dynamicSubtitles.length} bloques sincronizados · Cambios instantáneos
+              </span>
+            </div>
 
-                  <h4
-                    className={`text-sm font-bold leading-snug break-words ${
-                      portadaContrastTheme === 'neon-bw'
-                        ? 'text-white font-black drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
-                        : 'text-slate-950'
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-semibold text-slate-600 mr-0.5">Posición:</span>
+                {(
+                  [
+                    { id: 'bottom', label: 'Abajo' },
+                    { id: 'center', label: 'Centro' },
+                    { id: 'top', label: 'Arriba' },
+                  ] as Array<{ id: DynamicSubtitlePosition; label: string }>
+                ).map((pos) => (
+                  <button
+                    key={pos.id}
+                    type="button"
+                    onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
+                      subtitleSettings.position === pos.id
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
                     }`}
                   >
-                    {p.chapterTitle}
-                  </h4>
-                  <p
-                    className={`text-xs line-clamp-3 leading-relaxed ${
-                      portadaContrastTheme === 'neon-bw'
-                        ? 'text-slate-200 font-medium'
-                        : 'text-slate-700'
+                    {pos.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  exportDynamicSubtitlesAsSrt(
+                    dynamicSubtitles,
+                    videoBook.bookTitle || 'audiolibro-subtitulos'
+                  )
+                }
+                disabled={dynamicSubtitles.length === 0}
+                className="px-3 py-1 rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                title="Descargar archivo de subtítulos sincronizados (.SRT)"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Descargar .SRT</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-start">
+            {/* 1. Color del texto */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                <span>Color de fuente</span>
+                <span className="font-mono text-[11px] text-amber-800 uppercase">
+                  {subtitleSettings.textColor}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {SUBTITLE_COLOR_PRESETS.map((preset) => (
+                  <button
+                    key={preset.hex}
+                    type="button"
+                    onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
+                    title={preset.label}
+                    className={`w-6 h-6 rounded-full border-2 transition-transform cursor-pointer ${
+                      subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
+                        ? 'border-amber-600 scale-110 ring-2 ring-amber-300'
+                        : 'border-slate-300 hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: preset.hex }}
+                  />
+                ))}
+                <label
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer hover:border-amber-400"
+                  title="Elegir color personalizado"
+                >
+                  <input
+                    type="color"
+                    value={subtitleSettings.textColor}
+                    onChange={(e) =>
+                      handleUpdateSubtitleSettings({ textColor: e.target.value })
+                    }
+                    className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent p-0"
+                  />
+                  <span>Personalizado</span>
+                </label>
+              </div>
+            </div>
+
+            {/* 2. Tamaño de fuente */}
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-800">Tamaño de fuente</div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {(
+                  [
+                    { id: 'sm', label: 'Pequeño' },
+                    { id: 'md', label: 'Mediano' },
+                    { id: 'lg', label: 'Grande' },
+                    { id: 'xl', label: 'XL' },
+                  ] as Array<{ id: DynamicSubtitleSize; label: string }>
+                ).map((sz) => (
+                  <button
+                    key={sz.id}
+                    type="button"
+                    onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
+                    className={`py-1.5 px-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
+                      subtitleSettings.size === sz.id
+                        ? 'bg-amber-600 text-white border-amber-700'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
                     }`}
                   >
-                    {p.pageText}
-                  </p>
-                </div>
+                    {sz.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
+            {/* 3. Opacidad del fondo */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                <span>Opacidad del fondo</span>
+                <span className="font-mono text-amber-800">
+                  {Math.round(subtitleSettings.backgroundOpacity * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={95}
+                step={5}
+                value={Math.round(subtitleSettings.backgroundOpacity * 100)}
+                onChange={(e) =>
+                  handleUpdateSubtitleSettings({
+                    backgroundOpacity: Number(e.target.value) / 100,
+                  })
+                }
+                className="w-full accent-amber-600 cursor-pointer"
+              />
+              <div className="flex items-center justify-between text-[11px] font-mono text-slate-500">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onGeneratePageImage(idx);
-                  }}
-                  disabled={generatingPageIdx === idx || isGeneratingAllPages}
-                  className={`w-full mt-1 py-1.5 px-2.5 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    portadaContrastTheme === 'neon-bw'
-                      ? 'bg-black hover:bg-slate-900 border border-amber-400/80 text-white shadow-[0_0_8px_rgba(251,191,36,0.25)] hover:shadow-[0_0_15px_rgba(251,191,36,0.5)]'
-                      : 'bg-slate-900 hover:bg-indigo-600 text-white'
-                  }`}
+                  onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0 })}
+                  className="hover:text-amber-700 cursor-pointer"
                 >
-                  {generatingPageIdx === idx ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                      <span>Creando escena...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                      <span>{img ? 'Cambiar escena IA' : 'Generar escena IA'}</span>
-                    </>
-                  )}
+                  0% Sin fondo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.45 })}
+                  className="hover:text-amber-700 cursor-pointer"
+                >
+                  45% Suave
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.8 })}
+                  className="hover:text-amber-700 cursor-pointer"
+                >
+                  80% Cine
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.95 })}
+                  className="hover:text-amber-700 cursor-pointer"
+                >
+                  95% Sólido
                 </button>
               </div>
-            );
-          })}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* Collapsible Chapters Strip (Hidden by default — opened via "Capítulos" button) */}
+      {showChaptersList && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-extrabold text-amber-900">
+              Capítulos del Audiolibro ({pages.length} Capítulos · {formatSec(pageTimings.totalDuration)})
+            </h3>
+            <div className="flex items-center gap-2">
+              {onAddUnlimitedChapter && (
+                <button
+                  type="button"
+                  onClick={onAddUnlimitedChapter}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>+ Añadir Capítulo</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowChaptersList(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
+              >
+                Ocultar
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {pages.map((p, idx) => {
+              const isCurrent = idx === activePageIdx;
+              const img = pageImages[idx];
+              return (
+                <div
+                  key={p.pageNumber}
+                  onClick={() => jumpToPage(idx)}
+                  className={`group rounded-xl border p-3 transition-all cursor-pointer flex flex-col justify-between gap-2 ${
+                    isCurrent
+                      ? 'bg-amber-50/70 border-amber-500 ring-1 ring-amber-400'
+                      : 'bg-white border-slate-200 hover:border-amber-400'
+                  }`}
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-mono font-bold">
+                      <span className="text-amber-800">CAP. {p.pageNumber}</span>
+                      <span className="text-slate-500">{p.durationSec}s</span>
+                    </div>
+
+                    <div
+                      className="h-20 w-full rounded-lg overflow-hidden border border-slate-200 relative flex items-center justify-center"
+                      style={{
+                        background: `linear-gradient(135deg, ${p.primaryHex} 0%, ${p.secondaryHex} 100%)`,
+                      }}
+                    >
+                      {img ? (
+                        <img
+                          src={img}
+                          alt={p.chapterTitle}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-[11px] font-mono text-white px-2 text-center">
+                          Sin escena
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="text-xs font-bold text-slate-900 line-clamp-2">
+                      {p.chapterTitle}
+                    </h4>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onGeneratePageImage(idx);
+                    }}
+                    disabled={generatingPageIdx === idx || isGeneratingAllPages}
+                    className="w-full py-1.5 px-2 rounded-lg text-[11px] font-bold bg-slate-900 hover:bg-slate-800 text-white flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    {generatingPageIdx === idx ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                    ) : (
+                      <Sparkles className="w-3 h-3 text-amber-400" />
+                    )}
+                    <span>{img ? 'Cambiar IA' : 'Crear Escena IA'}</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

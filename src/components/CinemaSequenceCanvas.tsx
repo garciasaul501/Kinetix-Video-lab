@@ -28,6 +28,11 @@ import {
   drawDynamicSubtitleOnCanvas,
 } from '../utils/videoRenderer';
 import { exportDynamicSubtitlesAsSrt } from '../utils/scriptExporter';
+import {
+  unlockStudioAudioContext,
+  playBase64AudioViaWebAudio,
+  WebAudioPlaybackHandle,
+} from '../utils/audioPlayerEngine';
 
 export interface SequenceShot {
   shotNumber: number;
@@ -90,6 +95,7 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const webAudioRef = useRef<WebAudioPlaybackHandle | null>(null);
   const loadedImagesRef = useRef<Record<string, HTMLImageElement>>({});
 
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -153,16 +159,60 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
     });
   }, [shots]);
 
+  const stopWebAudio = useCallback(() => {
+    if (webAudioRef.current) {
+      webAudioRef.current.stop();
+      webAudioRef.current = null;
+    }
+  }, []);
+
+  const startSequenceAudio = useCallback(
+    (offsetSec = 0) => {
+      stopWebAudio();
+      if (audioRef.current && audioUrl) {
+        audioRef.current.muted = isMuted;
+        audioRef.current.volume = 1.0;
+        audioRef.current.currentTime = offsetSec;
+        audioRef.current.play().catch(() => {
+          if (audioBase64) {
+            playBase64AudioViaWebAudio(audioBase64, {
+              startOffsetSec: offsetSec,
+              muted: isMuted,
+              volume: 1.0,
+            })
+              .then((handle) => {
+                webAudioRef.current = handle;
+              })
+              .catch(() => {});
+          }
+        });
+      } else if (audioBase64) {
+        playBase64AudioViaWebAudio(audioBase64, {
+          startOffsetSec: offsetSec,
+          muted: isMuted,
+          volume: 1.0,
+        })
+          .then((handle) => {
+            webAudioRef.current = handle;
+          })
+          .catch(() => {});
+      }
+    },
+    [audioUrl, audioBase64, isMuted, stopWebAudio]
+  );
+
+  useEffect(() => {
+    return () => stopWebAudio();
+  }, [stopWebAudio]);
+
   const resetPlayback = useCallback(() => {
+    unlockStudioAudioContext();
     pausedAtRef.current = 0;
     startTimeRef.current = performance.now();
     setCurrentTime(0);
     setIsPlaying(true);
-    if (audioRef.current) {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(() => {});
-    }
-  }, []);
+    startSequenceAudio(0);
+  }, [startSequenceAudio]);
 
   useEffect(() => {
     resetPlayback();
@@ -170,19 +220,25 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
   }, [sequence.title, resetPlayback]);
 
   useEffect(() => {
-    if (!audioRef.current) return;
-    audioRef.current.muted = isMuted;
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+    }
+    if (webAudioRef.current) {
+      webAudioRef.current.setVolume(isMuted ? 0 : 1.0);
+    }
   }, [isMuted]);
 
   const togglePlay = () => {
+    unlockStudioAudioContext();
     if (isPlaying) {
       pausedAtRef.current = currentTime;
       setIsPlaying(false);
       audioRef.current?.pause();
+      stopWebAudio();
     } else {
       startTimeRef.current = performance.now() - pausedAtRef.current * 1000;
       setIsPlaying(true);
-      audioRef.current?.play().catch(() => {});
+      startSequenceAudio(pausedAtRef.current);
     }
   };
 
@@ -665,119 +721,187 @@ export const CinemaSequenceCanvas: React.FC<CinemaSequenceCanvasProps> = ({
         </div>
       </div>
 
-      {/* Dynamic Subtitles Bar for Video Sequence (Size, Color, Position & .SRT) */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-white border border-slate-200 rounded-lg">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
-            }
-            className={`px-2.5 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 border cursor-pointer whitespace-nowrap transition-colors ${
-              subtitleSettings.enabled
-                ? 'bg-amber-500 text-slate-950 border-amber-600'
-                : 'bg-slate-100 text-slate-700 border-slate-300'
-            }`}
-          >
-            <Subtitles className="w-3.5 h-3.5" />
-            <span>Subtítulos: {subtitleSettings.enabled ? 'ON' : 'OFF'}</span>
-          </button>
-          <span className="text-[11px] text-slate-500 font-mono">
-            {subtitleCues.length} líneas
-          </span>
+      {/* Dedicated Bottom Subtitle Settings Section (Color, Font Size & Background Opacity) */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                handleUpdateSubtitleSettings({ enabled: !subtitleSettings.enabled })
+              }
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border cursor-pointer whitespace-nowrap transition-colors ${
+                subtitleSettings.enabled
+                  ? 'bg-amber-500 text-slate-950 border-amber-600'
+                  : 'bg-slate-100 text-slate-700 border-slate-300'
+              }`}
+            >
+              <Subtitles className="w-3.5 h-3.5" />
+              <span>
+                Subtítulos Dinámicos: {subtitleSettings.enabled ? 'Activos' : 'Ocultos'}
+              </span>
+            </button>
+            <span className="text-xs text-slate-500 font-mono">
+              {subtitleCues.length} bloques sincronizados
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              {(
+                [
+                  { id: 'bottom', label: 'Abajo' },
+                  { id: 'center', label: 'Centro' },
+                  { id: 'top', label: 'Arriba' },
+                ] as Array<{ id: DynamicSubtitlePosition; label: string }>
+              ).map((pos) => (
+                <button
+                  key={pos.id}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
+                  className={`px-2 py-1 rounded-md text-xs font-semibold border cursor-pointer ${
+                    subtitleSettings.position === pos.id
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-400'
+                  }`}
+                >
+                  {pos.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                exportDynamicSubtitlesAsSrt(subtitleCues, sequence.title || 'secuencia-video')
+              }
+              disabled={subtitleCues.length === 0}
+              className="px-2.5 py-1 rounded-md border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>.SRT</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Size */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-semibold text-slate-600">Tamaño:</span>
-            {(
-              [
-                { id: 'sm', label: 'S' },
-                { id: 'md', label: 'M' },
-                { id: 'lg', label: 'G' },
-                { id: 'xl', label: 'XL' },
-              ] as Array<{ id: DynamicSubtitleSize; label: string }>
-            ).map((sz) => (
-              <button
-                key={sz.id}
-                type="button"
-                onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
-                className={`px-2 py-0.5 rounded text-xs font-bold border cursor-pointer ${
-                  subtitleSettings.size === sz.id
-                    ? 'bg-amber-600 text-white border-amber-700'
-                    : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
-                }`}
-              >
-                {sz.label}
-              </button>
-            ))}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+          {/* 1. Color del texto */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span>Color de subtítulos</span>
+              <span className="font-mono text-[11px] text-slate-500 uppercase">
+                {subtitleSettings.textColor}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {SUBTITLE_COLOR_PRESETS.map((preset) => (
+                <button
+                  key={preset.hex}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
+                  title={preset.label}
+                  className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-transform ${
+                    subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
+                      ? 'border-amber-600 scale-110 ring-2 ring-amber-300'
+                      : 'border-slate-300 hover:scale-105'
+                  }`}
+                  style={{ backgroundColor: preset.hex }}
+                />
+              ))}
+              <label className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-700 cursor-pointer hover:border-amber-400">
+                <input
+                  type="color"
+                  value={subtitleSettings.textColor}
+                  onChange={(e) =>
+                    handleUpdateSubtitleSettings({ textColor: e.target.value })
+                  }
+                  className="w-4 h-4 rounded cursor-pointer border-0 bg-transparent p-0"
+                />
+                <span>Otro</span>
+              </label>
+            </div>
           </div>
 
-          {/* Color */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs font-semibold text-slate-600">Color:</span>
-            {SUBTITLE_COLOR_PRESETS.map((preset) => (
-              <button
-                key={preset.hex}
-                type="button"
-                onClick={() => handleUpdateSubtitleSettings({ textColor: preset.hex })}
-                title={preset.label}
-                className={`w-4 h-4 rounded-full border-2 cursor-pointer ${
-                  subtitleSettings.textColor.toLowerCase() === preset.hex.toLowerCase()
-                    ? 'border-amber-600 scale-110'
-                    : 'border-slate-300'
-                }`}
-                style={{ backgroundColor: preset.hex }}
-              />
-            ))}
+          {/* 2. Tamaño de fuente */}
+          <div className="space-y-1.5">
+            <div className="text-xs font-bold text-slate-700">Tamaño de fuente</div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(
+                [
+                  { id: 'sm', label: 'Pequeño' },
+                  { id: 'md', label: 'Mediano' },
+                  { id: 'lg', label: 'Grande' },
+                  { id: 'xl', label: 'XL' },
+                ] as Array<{ id: DynamicSubtitleSize; label: string }>
+              ).map((sz) => (
+                <button
+                  key={sz.id}
+                  type="button"
+                  onClick={() => handleUpdateSubtitleSettings({ size: sz.id })}
+                  className={`py-1.5 px-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors ${
+                    subtitleSettings.size === sz.id
+                      ? 'bg-amber-600 text-white border-amber-700'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-amber-400'
+                  }`}
+                >
+                  {sz.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 3. Opacidad del fondo */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+              <span>Opacidad del fondo</span>
+              <span className="font-mono text-amber-800">
+                {Math.round(subtitleSettings.backgroundOpacity * 100)}%
+              </span>
+            </div>
             <input
-              type="color"
-              value={subtitleSettings.textColor}
+              type="range"
+              min={0}
+              max={95}
+              step={5}
+              value={Math.round(subtitleSettings.backgroundOpacity * 100)}
               onChange={(e) =>
-                handleUpdateSubtitleSettings({ textColor: e.target.value })
+                handleUpdateSubtitleSettings({
+                  backgroundOpacity: Number(e.target.value) / 100,
+                })
               }
-              title="Color personalizado de subtítulos"
-              className="w-5 h-5 rounded cursor-pointer border border-slate-300 bg-transparent p-0"
+              className="w-full accent-amber-600 cursor-pointer"
             />
-          </div>
-
-          {/* Position */}
-          <div className="flex items-center gap-1">
-            {(
-              [
-                { id: 'bottom', label: 'Abajo' },
-                { id: 'center', label: 'Centro' },
-                { id: 'top', label: 'Arriba' },
-              ] as Array<{ id: DynamicSubtitlePosition; label: string }>
-            ).map((pos) => (
+            <div className="flex items-center justify-between text-[10px] font-mono text-slate-500">
               <button
-                key={pos.id}
                 type="button"
-                onClick={() => handleUpdateSubtitleSettings({ position: pos.id })}
-                className={`px-2 py-0.5 rounded text-xs font-semibold border cursor-pointer ${
-                  subtitleSettings.position === pos.id
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-slate-50 text-slate-700 border-slate-200'
-                }`}
+                onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0 })}
+                className="hover:text-amber-700 cursor-pointer"
               >
-                {pos.label}
+                0% Transparente
               </button>
-            ))}
+              <button
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.5 })}
+                className="hover:text-amber-700 cursor-pointer"
+              >
+                50%
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.8 })}
+                className="hover:text-amber-700 cursor-pointer"
+              >
+                80% Cine
+              </button>
+              <button
+                type="button"
+                onClick={() => handleUpdateSubtitleSettings({ backgroundOpacity: 0.95 })}
+                className="hover:text-amber-700 cursor-pointer"
+              >
+                95%
+              </button>
+            </div>
           </div>
-
-          {/* SRT Export */}
-          <button
-            type="button"
-            onClick={() =>
-              exportDynamicSubtitlesAsSrt(subtitleCues, sequence.title || 'secuencia-video')
-            }
-            disabled={subtitleCues.length === 0}
-            className="px-2 py-0.5 rounded border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
-          >
-            <Download className="w-3 h-3" />
-            <span>.SRT</span>
-          </button>
         </div>
       </div>
     </div>

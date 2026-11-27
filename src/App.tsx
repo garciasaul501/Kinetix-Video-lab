@@ -50,6 +50,9 @@ import {
   Eye,
   EyeOff,
   Keyboard,
+  LogOut,
+  BarChart3,
+  Activity,
 } from 'lucide-react';
 import { pcmBase64ToWav } from './utils/audioWav';
 import {
@@ -101,6 +104,9 @@ import {
   loadCustomFoldersFromStorage,
   saveCustomFoldersToStorage,
   saveMediaBlobToIdb,
+  saveActivityExportToIdb,
+  buildScriptExportBlob,
+  ActivityAssetCategory,
 } from './utils/studioStorage';
 import { AudiobookFolderVault } from './components/AudiobookFolderVault';
 import { ScriptHistoryVault } from './components/ScriptHistoryVault';
@@ -111,8 +117,9 @@ import {
 } from './components/PayPalMonetizationHub';
 import {
   AdminControlModal,
+  AccountModalTab,
 } from './components/AdminControlModal';
-import { AdminDashboardView } from './components/AdminDashboardView';
+import { AdminDashboardView, AdminSubTab } from './components/AdminDashboardView';
 import type { User as FirebaseAuthUser } from 'firebase/auth';
 import {
   StudioUserAccount,
@@ -130,6 +137,7 @@ import {
   recordUserStudioActivity,
   createFirestorePendingOrder,
   confirmFirestorePaidOrderAtomically,
+  signInWithGooglePopup,
   signOutFirebaseUser,
   formatUsdPrice,
   resolvePromoBannerText,
@@ -1364,12 +1372,32 @@ ${textoPdf || '{{texto_pdf}}'}
     exportProposalAsPdf(proposal);
     setProposalExportedFormat('pdf');
     setTimeout(() => setProposalExportedFormat(null), 2200);
+    const proposalText = `${proposal.projectTitle}\n\n${proposal.analysisSynthesis?.coreMessage || ''}\n\n${proposal.fullVoiceoverScript || ''}`;
+    void archiveExportInActivityIdb(
+      'script',
+      proposal.projectTitle || 'Propuesta Audiovisual',
+      `Director PDF · ${proposal.targetFormat} (${proposal.targetDuration})`,
+      'PDF/TXT',
+      `${(proposal.projectTitle || 'propuesta').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.txt`,
+      new Blob([proposalText], { type: 'text/plain;charset=utf-8' }),
+      'Director PDF'
+    );
   };
 
   const handleExportProposalTxt = () => {
     exportProposalAsTxt(proposal);
     setProposalExportedFormat('txt');
     setTimeout(() => setProposalExportedFormat(null), 2200);
+    const proposalText = `${proposal.projectTitle}\n\n${proposal.analysisSynthesis?.coreMessage || ''}\n\n${proposal.fullVoiceoverScript || ''}`;
+    void archiveExportInActivityIdb(
+      'script',
+      proposal.projectTitle || 'Propuesta Audiovisual',
+      `Director PDF · ${proposal.targetFormat} (${proposal.targetDuration})`,
+      'TXT',
+      `${(proposal.projectTitle || 'propuesta').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.txt`,
+      new Blob([proposalText], { type: 'text/plain;charset=utf-8' }),
+      'Director PDF'
+    );
   };
 
   // --- SPOKEN AI AUDIOBOOK & VIDEO-EBOOK HANDLERS ---
@@ -1549,6 +1577,16 @@ ${textoPdf || '{{texto_pdf}}'}
           skipBrowserDownload: true,
         });
         await saveMediaBlobToIdb(`${newItemId}:mp3`, blob);
+        void archiveExportInActivityIdb(
+          'audiobook',
+          videoBook.bookTitle || 'Audiolibro IA',
+          `${videoBook.pages.length} capítulos · Carpeta: ${folderName}`,
+          'MP3',
+          `${(videoBook.bookTitle || 'audiolibro').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.mp3`,
+          blob,
+          'Audiolibros IA',
+          `${newItemId}:mp3`
+        );
         hasMp3Blob = true;
         const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
         fileSizeLabel = `${mb} MB (MP3)`;
@@ -1571,6 +1609,16 @@ ${textoPdf || '{{texto_pdf}}'}
           const resp = await fetch(mp4Url);
           const mp4Blob = await resp.blob();
           await saveMediaBlobToIdb(`${newItemId}:mp4`, mp4Blob);
+          void archiveExportInActivityIdb(
+            'video',
+            videoBook.bookTitle || 'Audiolibro Video IA',
+            `${videoBook.pages.length} capítulos · Video MP4`,
+            'MP4',
+            `${(videoBook.bookTitle || 'audiolibro').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.mp4`,
+            mp4Blob,
+            'Audiolibros IA',
+            `${newItemId}:mp4`
+          );
           hasMp4Blob = true;
           const mb = Math.max(1.2, mp4Blob.size / (1024 * 1024)).toFixed(1);
           fileSizeLabel = `${mb} MB (MP4)`;
@@ -1692,6 +1740,16 @@ ${textoPdf || '{{texto_pdf}}'}
         const mp4Blob = await resp.blob();
         const autoId = `ab-mp4-${Date.now()}`;
         await saveMediaBlobToIdb(`${autoId}:mp4`, mp4Blob);
+        void archiveExportInActivityIdb(
+          'video',
+          videoBook.bookTitle || 'Audiolibro IA',
+          `${videoBook.pages.length} capítulos · Video MP4 exportado`,
+          'MP4',
+          `${(videoBook.bookTitle || 'audiolibro').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.mp4`,
+          mp4Blob,
+          'Audiolibros IA',
+          `${autoId}:mp4`
+        );
         const mb = Math.max(1.2, mp4Blob.size / (1024 * 1024)).toFixed(1);
         const nowStr = new Date().toLocaleTimeString('es-ES', {
           hour: '2-digit',
@@ -1784,6 +1842,16 @@ ${textoPdf || '{{texto_pdf}}'}
       try {
         const autoId = `ab-mp3-${Date.now()}`;
         await saveMediaBlobToIdb(`${autoId}:mp3`, blob);
+        void archiveExportInActivityIdb(
+          'audiobook',
+          videoBook.bookTitle || 'Audiolibro IA',
+          `${videoBook.pages.length} capítulos · Audio MP3 24kHz`,
+          'MP3',
+          `${slug || 'audiolibro'}-completo.mp3`,
+          blob,
+          'Audiolibros IA',
+          `${autoId}:mp3`
+        );
         const mb = Math.max(0.4, blob.size / (1024 * 1024)).toFixed(1);
         const nowStr = new Date().toLocaleTimeString('es-ES', {
           hour: '2-digit',
@@ -2092,6 +2160,20 @@ ${textoPdf || '{{texto_pdf}}'}
     });
     setExportedFormat('pdf');
     setTimeout(() => setExportedFormat(null), 2200);
+    const scriptBlob = buildScriptExportBlob(generatedScript, {
+      topic: scriptTopic,
+      tone: scriptTone,
+      targetAudience: scriptAudience,
+    });
+    void archiveExportInActivityIdb(
+      'script',
+      generatedScript.title || 'Guion de 2 Minutos',
+      `${generatedScript.scenes.length} escenas · ${generatedScript.totalDuration}`,
+      'PDF/TXT',
+      `${(generatedScript.title || 'guion').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.txt`,
+      scriptBlob,
+      'Guion 2 Minutos'
+    );
   };
 
   const handleExportTxt = () => {
@@ -2102,6 +2184,20 @@ ${textoPdf || '{{texto_pdf}}'}
     });
     setExportedFormat('txt');
     setTimeout(() => setExportedFormat(null), 2200);
+    const scriptBlob = buildScriptExportBlob(generatedScript, {
+      topic: scriptTopic,
+      tone: scriptTone,
+      targetAudience: scriptAudience,
+    });
+    void archiveExportInActivityIdb(
+      'script',
+      generatedScript.title || 'Guion de 2 Minutos',
+      `${generatedScript.scenes.length} escenas · ${generatedScript.totalDuration}`,
+      'TXT',
+      `${(generatedScript.title || 'guion').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.txt`,
+      scriptBlob,
+      'Guion 2 Minutos'
+    );
   };
 
   // --- HANDLERS ---
@@ -2443,6 +2539,24 @@ ${textoPdf || '{{texto_pdf}}'}
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+
+    // Archive exported video MP4 blob into IndexedDB Activity History
+    if (filename.toLowerCase().endsWith('.mp4')) {
+      void fetch(url)
+        .then((res) => res.blob())
+        .then((videoBlob) =>
+          archiveExportInActivityIdb(
+            'video',
+            sequencePlan.title || 'Video Cinematográfico IA',
+            `${sequencePlan.shots.length} planos · ${sequenceAspectRatio} (${veoResolution})`,
+            'MP4',
+            filename,
+            videoBlob,
+            'Clips y Storyboard'
+          )
+        )
+        .catch(() => {});
+    }
   };
 
   const handleGenerateVeoVideo = async () => {
@@ -2646,9 +2760,42 @@ ${textoPdf || '{{texto_pdf}}'}
     setActiveModule('paypal-monetization');
   };
 
-  // Administrator Account Session
+  // Administrator Account Session & Activity History Modal State
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
+  const [accountModalInitialTab, setAccountModalInitialTab] = useState<AccountModalTab>('account');
+  const [activityHistoryRefreshKey, setActivityHistoryRefreshKey] = useState(0);
   const [isViralLogoModalOpen, setIsViralLogoModalOpen] = useState(false);
+
+  const openAccountModal = (tab: AccountModalTab = 'account') => {
+    setAccountModalInitialTab(tab);
+    setIsAdminModalOpen(true);
+  };
+
+  const archiveExportInActivityIdb = async (
+    category: ActivityAssetCategory,
+    title: string,
+    subtitle: string,
+    format: string,
+    fileName: string,
+    blob: Blob,
+    moduleLabel: string,
+    existingBlobKey?: string
+  ) => {
+    await saveActivityExportToIdb(
+      {
+        category,
+        title,
+        subtitle,
+        format,
+        fileName,
+        mimeType: blob.type || 'application/octet-stream',
+        moduleLabel,
+        blobKey: existingBlobKey,
+      },
+      blob
+    );
+    setActivityHistoryRefreshKey((prev) => prev + 1);
+  };
   const [isSupportConciergeOpen, setIsSupportConciergeOpen] = useState(false);
   const [isBuyTokensModalOpen, setIsBuyTokensModalOpen] = useState(false);
   const [isSocialShareModalOpen, setIsSocialShareModalOpen] = useState(false);
@@ -2874,6 +3021,10 @@ ${textoPdf || '{{texto_pdf}}'}
   const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [isPreviewingCustomerView, setIsPreviewingCustomerView] = useState<boolean>(false);
+  const [adminDashboardTab, setAdminDashboardTab] = useState<AdminSubTab>('users');
+  const [isQuickSigningIn, setIsQuickSigningIn] = useState<boolean>(false);
+  const [authModalError, setAuthModalError] = useState<string | null>(null);
+  const pendingAdminOpenRef = useRef<boolean>(false);
   const [adminUsersList, setAdminUsersList] = useState<StudioUserAccount[]>([]);
   const [adminUsageEvents, setAdminUsageEvents] = useState<StudioUsageEvent[]>([]);
   const [adminOrdersList, setAdminOrdersList] = useState<StudioOrderRecord[]>([]);
@@ -2995,6 +3146,22 @@ ${textoPdf || '{{texto_pdf}}'}
     return () => unsub();
   }, []);
 
+  const restoreGuestAccountDefaults = () => {
+    setFirebaseProfile(null);
+    setIsFirebaseAdmin(false);
+    setIsPreviewingCustomerView(false);
+    try {
+      const savedTokens = localStorage.getItem('kinetix_user_tokens');
+      setUserTokenBalance(savedTokens ? Number(savedTokens) || 62500 : 62500);
+      setUserAccessTier(localStorage.getItem('kinetix_access_tier_v1') || 'free');
+      setUserAccessLabel(localStorage.getItem('kinetix_access_label_v1') || '');
+    } catch {
+      setUserTokenBalance(62500);
+      setUserAccessTier('free');
+      setUserAccessLabel('');
+    }
+  };
+
   // Subscribe to Firebase Auth & sync user profile/role to Firestore
   useEffect(() => {
     let unsubOwnProfile: (() => void) | null = null;
@@ -3005,9 +3172,7 @@ ${textoPdf || '{{texto_pdf}}'}
       }
       setFirebaseUser(user);
       if (!user) {
-        setFirebaseProfile(null);
-        setIsFirebaseAdmin(false);
-        setIsPreviewingCustomerView(false);
+        restoreGuestAccountDefaults();
         setIsAuthLoading(false);
         return;
       }
@@ -3017,17 +3182,37 @@ ${textoPdf || '{{texto_pdf}}'}
         const strictAdmin = isAdmin && profile.role === 'admin';
         setFirebaseProfile(profile);
         setIsFirebaseAdmin(strictAdmin);
+        setAuthModalError(null);
         if (strictAdmin) {
           setIsBuyTokensModalOpen(false);
           setUserTokenBalance(9999999);
           setUserAccessTier('vip');
           setUserAccessLabel('Modo Administrador · Ilimitado');
+          if (pendingAdminOpenRef.current) {
+            pendingAdminOpenRef.current = false;
+            setIsAdminModalOpen(false);
+            setAdminDashboardTab('users');
+            setActiveModule('admin-dashboard');
+            toast.success(
+              'Modo Administrador Activo',
+              'Ya tienes acceso a todos los botones y secciones de administración.'
+            );
+          }
         } else {
           setIsPreviewingCustomerView(false);
           setUserTokenBalance(profile.tokenBalance);
           setUserAccessTier(profile.planTier);
           if (profile.planTier !== 'free' && profile.subscriptionStatus === 'active') {
             setUserAccessLabel(`Plan ${profile.planTier.toUpperCase()} Activo`);
+          } else {
+            setUserAccessLabel('');
+          }
+          if (pendingAdminOpenRef.current) {
+            pendingAdminOpenRef.current = false;
+            toast.info(
+              'Sesión iniciada como Cliente',
+              'Esta cuenta de Google tiene rol de usuario. Usa el botón Salir para cambiar a tu cuenta de Administrador.'
+            );
           }
         }
         unsubOwnProfile = subscribeOwnUserProfile(user.uid, (liveProfile) => {
@@ -3047,10 +3232,16 @@ ${textoPdf || '{{texto_pdf}}'}
             setIsPreviewingCustomerView(false);
             setUserTokenBalance(liveProfile.tokenBalance);
             setUserAccessTier(liveProfile.planTier);
+            if (liveProfile.planTier !== 'free' && liveProfile.subscriptionStatus === 'active') {
+              setUserAccessLabel(`Plan ${liveProfile.planTier.toUpperCase()} Activo`);
+            } else {
+              setUserAccessLabel('');
+            }
           }
         });
       } catch (err) {
         console.error('Error syncing Firebase user profile:', err);
+        pendingAdminOpenRef.current = false;
       } finally {
         setIsAuthLoading(false);
       }
@@ -3117,12 +3308,57 @@ ${textoPdf || '{{texto_pdf}}'}
     ).catch(() => {});
   }, [activeModule]);
 
-  const handleFirebaseSignOut = async () => {
-    await signOutFirebaseUser();
-    if (activeModule === 'admin-dashboard') {
-      setActiveModule('videobook');
+  const openAdminSection = (tab: AdminSubTab = 'users') => {
+    setAdminDashboardTab(tab);
+    setActiveModule('admin-dashboard');
+    setMobileSidebarOpen(false);
+  };
+
+  const handleQuickAdminSignIn = async () => {
+    if (isVerifiedFirestoreAdmin) {
+      openAdminSection('users');
+      return;
     }
-    toast.info('Sesión cerrada', 'Puedes iniciar sesión con otra cuenta cuando gustes.');
+    setAuthModalError(null);
+    setIsQuickSigningIn(true);
+    pendingAdminOpenRef.current = true;
+    try {
+      await signInWithGooglePopup();
+    } catch (err: unknown) {
+      pendingAdminOpenRef.current = false;
+      const msg =
+        err instanceof Error && err.message.includes('popup-closed-by-user')
+          ? 'Cerraste la ventana de Google. Haz clic en el botón de abajo para intentarlo de nuevo.'
+          : err instanceof Error && err.message.includes('popup-blocked')
+            ? 'Tu navegador bloqueó la ventana emergente de Google. Permite ventanas emergentes e intenta desde aquí.'
+            : 'No se pudo completar el inicio de sesión con Google. Intenta nuevamente desde esta ventana.';
+      setAuthModalError(msg);
+      openAccountModal('account');
+    } finally {
+      setIsQuickSigningIn(false);
+    }
+  };
+
+  const handleFirebaseSignOut = async () => {
+    const wasAdmin = isVerifiedFirestoreAdmin;
+    pendingAdminOpenRef.current = false;
+    setAuthModalError(null);
+    try {
+      await signOutFirebaseUser();
+    } finally {
+      restoreGuestAccountDefaults();
+      setIsAdminModalOpen(false);
+      setMobileSidebarOpen(false);
+      if (activeModule === 'admin-dashboard') {
+        setActiveModule('videobook');
+      }
+    }
+    toast.info(
+      wasAdmin ? 'Saliste del Modo Administrador' : 'Sesión cerrada',
+      wasAdmin
+        ? 'Volviste al modo estándar. Pulsa "Entrar Admin" arriba cuando quieras volver a administrar.'
+        : 'Puedes iniciar sesión con otra cuenta cuando gustes.'
+    );
   };
 
   // Context-aware global shortcut actions (Ctrl+S & Ctrl+Enter)
@@ -3448,31 +3684,124 @@ ${textoPdf || '{{texto_pdf}}'}
             </button>
           </div>
 
-          {/* Primary Top CTA: Pure Admin sees Admin Dashboard CTA (NO subscriber buttons); Customers see Subscribe CTA */}
-          <div className="px-4 pt-4 pb-2">
-            {isPureAdminMode ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveModule('admin-dashboard');
-                  setMobileSidebarOpen(false);
-                }}
-                className={`w-full px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer border ${
-                  activeModule === 'admin-dashboard'
-                    ? 'bg-slate-950 text-amber-300 border-amber-500'
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
-                }`}
-                title="Ver suscriptores, quién usa la app, inactivos e ingresos"
-              >
-                <span className="flex items-center gap-2 truncate">
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Panel Admin y Suscriptores</span>
+          {/* Organized Admin Command Center in Sidebar (Shown ONLY to Verified Firestore Admins) */}
+          {isVerifiedFirestoreAdmin ? (
+            <div className="px-3 pt-4 pb-3 border-b border-slate-200/80 space-y-1.5 bg-slate-50/60">
+              <div className="px-2.5 pb-1 flex items-center justify-between gap-2">
+                <span className="text-[11px] font-extrabold text-emerald-800 tracking-wide">
+                  Administración
                 </span>
-                <span className="px-1.5 py-0.5 rounded bg-black/20 font-mono text-[10px]">
-                  {adminUsersList.filter((u) => u.role !== 'admin').length}
+                <span className="text-[10px] font-mono font-bold text-slate-500">
+                  {isPreviewingCustomerView ? 'Vista Cliente' : 'Admin Puro'}
                 </span>
-              </button>
-            ) : (
+              </div>
+
+              {[
+                {
+                  id: 'users' as const,
+                  label: 'Suscriptores y Usuarios',
+                  count: adminUsersList.filter((u) => u.role !== 'admin').length,
+                  icon: Users,
+                },
+                {
+                  id: 'analytics' as const,
+                  label: 'Analíticas Conversión',
+                  icon: BarChart3,
+                },
+                {
+                  id: 'activity' as const,
+                  label: 'Actividad en Vivo',
+                  count: adminUsageEvents.length,
+                  icon: Activity,
+                },
+                {
+                  id: 'orders' as const,
+                  label: 'Ventas PayPal',
+                  count: adminOrdersList.length,
+                  icon: DollarSign,
+                },
+                {
+                  id: 'profitability' as const,
+                  label: 'Tarifas y Cuota Gratis',
+                  icon: Sliders,
+                },
+              ].map((item) => {
+                const Icon = item.icon;
+                const isActive =
+                  activeModule === 'admin-dashboard' && adminDashboardTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openAdminSection(item.id)}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                      isActive
+                        ? 'bg-slate-950 text-amber-300 border border-amber-500/60'
+                        : 'text-slate-800 hover:bg-white hover:text-slate-950 border border-transparent hover:border-slate-200'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <Icon
+                        className={`w-3.5 h-3.5 shrink-0 ${
+                          isActive ? 'text-amber-400' : 'text-emerald-700'
+                        }`}
+                      />
+                      <span className="truncate">{item.label}</span>
+                    </span>
+                    {typeof item.count === 'number' && (
+                      <span
+                        className={`text-[11px] font-mono tabular-nums shrink-0 ${
+                          isActive ? 'text-amber-200' : 'text-slate-500'
+                        }`}
+                      >
+                        {item.count}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+
+              <div className="grid grid-cols-2 gap-1.5 pt-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPreviewingCustomerView((prev) => !prev);
+                    setMobileSidebarOpen(false);
+                  }}
+                  className={`px-2.5 py-2 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 border transition-colors cursor-pointer whitespace-nowrap ${
+                    isPreviewingCustomerView
+                      ? 'bg-amber-500 text-slate-950 border-amber-600'
+                      : 'bg-white hover:bg-amber-50 text-slate-700 border-slate-200'
+                  }`}
+                  title={
+                    isPreviewingCustomerView
+                      ? 'Volver al Modo Administrador Puro'
+                      : 'Activar Vista de Cliente para ver las opciones de suscriptor'
+                  }
+                >
+                  {isPreviewingCustomerView ? (
+                    <EyeOff className="w-3.5 h-3.5 shrink-0" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span className="truncate">
+                    {isPreviewingCustomerView ? 'Admin Puro' : 'Vista Cliente'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleFirebaseSignOut()}
+                  className="px-2.5 py-2 rounded-lg bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-extrabold flex items-center justify-center gap-1 transition-colors cursor-pointer whitespace-nowrap"
+                  title="Salir del Modo Administrador"
+                >
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Salir Admin</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="px-4 pt-4 pb-2 space-y-2">
               <button
                 type="button"
                 onClick={() => {
@@ -3489,8 +3818,8 @@ ${textoPdf || '{{texto_pdf}}'}
                 <Zap className="w-4 h-4 fill-current shrink-0" />
                 <span className="truncate">{t('subscribeNow', currentLanguage)}</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Primary Studio Modules Navigation */}
           <div className="px-3 py-3 space-y-1">
@@ -3576,53 +3905,9 @@ ${textoPdf || '{{texto_pdf}}'}
           </div>
         </div>
 
-        {/* Sidebar Footer: Admin Status Card (Pure Admin) OR Token Balance + $5 DLL (Subscribers) */}
+        {/* Sidebar Footer: Organized Account, Admin Entry/Exit & Quick Tools */}
         <div className="p-3 border-t border-slate-200/80 space-y-2 bg-slate-50/40 shrink-0">
-          {isPureAdminMode ? (
-            <div className="px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-2 text-white">
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-[10px] font-mono uppercase font-bold text-emerald-400">
-                    MODO ADMINISTRADOR
-                  </div>
-                  <div className="text-xs font-extrabold text-amber-300 truncate">
-                    Acceso Total Ilimitado
-                  </div>
-                  <div className="text-[10px] text-slate-400 truncate">
-                    {adminUsersList.filter((u) => u.role !== 'admin').length} usuarios ·{' '}
-                    {
-                      adminUsersList.filter(
-                        (u) => u.role !== 'admin' && u.planTier !== 'free' && u.subscriptionStatus === 'active'
-                      ).length
-                    }{' '}
-                    suscriptores
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveModule('admin-dashboard');
-                    setMobileSidebarOpen(false);
-                  }}
-                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                >
-                  Panel
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsPreviewingCustomerView(true);
-                  setMobileSidebarOpen(false);
-                }}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                title="Activar manualmente Vista de Cliente para previsualizar las opciones de suscriptor"
-              >
-                <Eye className="w-3.5 h-3.5 text-amber-300" />
-                <span>Activar Vista de Cliente</span>
-              </button>
-            </div>
-          ) : (
+          {!isPureAdminMode && (
             <div className="px-3 py-2.5 rounded-xl bg-white border border-amber-200/80 flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-[11px] font-medium text-slate-500">
@@ -3653,6 +3938,68 @@ ${textoPdf || '{{texto_pdf}}'}
               </button>
             </div>
           )}
+
+          {/* Direct Admin Sign-In OR Signed-In Account Switcher */}
+          {!firebaseProfile ? (
+            <button
+              type="button"
+              disabled={isQuickSigningIn || isAuthLoading}
+              onClick={() => {
+                setMobileSidebarOpen(false);
+                void handleQuickAdminSignIn();
+              }}
+              className="w-full px-3 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-amber-300 border border-amber-500/50 text-xs font-extrabold flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-60"
+              title="Inicia sesión con tu cuenta de Google para entrar como Administrador"
+            >
+              {isQuickSigningIn ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+              ) : (
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              )}
+              <span className="truncate">
+                {isQuickSigningIn ? 'Conectando...' : 'Entrar como Administrador'}
+              </span>
+            </button>
+          ) : !isVerifiedFirestoreAdmin ? (
+            <div className="px-3 py-2 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold text-slate-900 truncate">
+                  {firebaseProfile.displayName}
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">
+                  Cuenta Cliente · Plan {firebaseProfile.planTier}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleFirebaseSignOut()}
+                className="px-2 py-1.5 rounded-lg bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 text-[11px] font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                title="Cerrar sesión para cambiar a la cuenta de Administrador"
+              >
+                <LogOut className="w-3 h-3" />
+                <span>Salir</span>
+              </button>
+            </div>
+          ) : null}
+
+          {/* Quick Access to User Activity History (IndexedDB Downloads) */}
+          <button
+            type="button"
+            onClick={() => {
+              openAccountModal('history');
+              setMobileSidebarOpen(false);
+            }}
+            className="w-full px-3 py-2 rounded-xl bg-white hover:bg-amber-50 text-slate-800 hover:text-amber-950 border border-slate-200 hover:border-amber-300 text-xs font-bold flex items-center justify-between gap-2 transition-colors cursor-pointer"
+            title="Ver y descargar audiolibros, guiones y videos exportados desde IndexedDB"
+          >
+            <span className="inline-flex items-center gap-2 truncate">
+              <History className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <span className="truncate">Mi Historial de Actividad</span>
+            </span>
+            <span className="font-mono text-[10px] font-bold text-slate-500 shrink-0">
+              IDB
+            </span>
+          </button>
 
           {/* Utility Actions */}
           <div className="grid grid-cols-3 gap-1">
@@ -3685,11 +4032,7 @@ ${textoPdf || '{{texto_pdf}}'}
             <button
               type="button"
               onClick={() => {
-                if (isVerifiedFirestoreAdmin) {
-                  setActiveModule('admin-dashboard');
-                } else {
-                  setIsAdminModalOpen(true);
-                }
+                openAccountModal('account');
                 setMobileSidebarOpen(false);
               }}
               className={`px-2 py-2 rounded-lg text-xs font-semibold flex flex-col items-center justify-center gap-1 border transition-colors cursor-pointer ${
@@ -3699,13 +4042,7 @@ ${textoPdf || '{{texto_pdf}}'}
                     ? 'bg-amber-50 text-amber-900 border-amber-200'
                     : 'text-slate-700 hover:text-amber-900 hover:bg-white border-transparent hover:border-slate-200'
               }`}
-              title={
-                isVerifiedFirestoreAdmin
-                  ? 'Abrir Panel de Administrador'
-                  : firebaseProfile
-                    ? 'Mi Cuenta'
-                    : 'Iniciar Sesión (Admin / Cuenta)'
-              }
+              title="Abrir detalles de Cuenta y Acceso"
             >
               <ShieldCheck
                 className={`w-3.5 h-3.5 ${
@@ -3713,7 +4050,7 @@ ${textoPdf || '{{texto_pdf}}'}
                 }`}
               />
               <span className="truncate max-w-full">
-                {isVerifiedFirestoreAdmin ? 'Admin' : firebaseProfile ? 'Cuenta' : 'Entrar'}
+                {isVerifiedFirestoreAdmin ? 'Admin' : 'Cuenta'}
               </span>
             </button>
           </div>
@@ -3725,7 +4062,7 @@ ${textoPdf || '{{texto_pdf}}'}
          ===================================================================== */}
       <div className="flex-1 min-w-0 flex flex-col bg-white">
         {/* Clean 1-Row Sticky Top Header Bar */}
-        <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-8 flex items-center justify-between gap-4">
+        <header className="sticky top-0 z-20 h-16 bg-white/95 backdrop-blur-md border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-3">
           {/* Left: Mobile Menu Button + Clean Breadcrumb Title */}
           <div className="flex items-center gap-3 min-w-0">
             <button
@@ -3739,40 +4076,29 @@ ${textoPdf || '{{texto_pdf}}'}
 
             <div className="flex items-center gap-2 min-w-0 text-sm">
               <span className="text-slate-500 font-medium hidden sm:inline whitespace-nowrap">
-                Estudio
+                {activeModule === 'admin-dashboard' ? 'Administración' : 'Estudio'}
               </span>
               <span className="text-slate-300 hidden sm:inline" aria-hidden="true">
                 /
               </span>
               <h1 className="font-display text-base sm:text-lg font-extrabold text-amber-800 truncate">
-                {STUDIO_MODULE_SEO_MAP[activeModule]?.shortLabel || 'Audiolibros IA'}
+                {activeModule === 'admin-dashboard'
+                  ? adminDashboardTab === 'users'
+                    ? 'Suscriptores y Usuarios'
+                    : adminDashboardTab === 'analytics'
+                      ? 'Analíticas de Conversión'
+                      : adminDashboardTab === 'activity'
+                        ? 'Actividad en Vivo'
+                        : adminDashboardTab === 'orders'
+                          ? 'Ventas PayPal'
+                          : 'Tarifas y Cuota Gratis'
+                  : STUDIO_MODULE_SEO_MAP[activeModule]?.shortLabel || 'Audiolibros IA'}
               </h1>
-              <span className="hidden xl:inline text-slate-300 mx-1" aria-hidden="true">
-                ·
-              </span>
-              <span className="hidden xl:inline text-xs text-slate-500 truncate max-w-md">
-                {STUDIO_MODULE_SEO_MAP[activeModule]?.shortDescription}
-              </span>
             </div>
           </div>
 
-          {/* Right: Crear PDF Completo con IA + Play Button + Language Selector */}
+          {/* Right: Clean Single-Line Studio & Admin Session Controls */}
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => setActiveModule('ai-pdf-creator')}
-              className={`px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
-                activeModule === 'ai-pdf-creator'
-                  ? 'bg-slate-950 text-amber-400 border-amber-500/70'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
-              }`}
-              title="Crear un documento PDF completo con IA integrando texto, imágenes, voz 24kHz, subtítulos y video"
-            >
-              <FilePlus2 className={`w-3.5 h-3.5 ${activeModule === 'ai-pdf-creator' ? 'text-amber-400' : 'text-amber-700'}`} />
-              <span className="hidden sm:inline">Crear PDF Completo con IA</span>
-              <span className="sm:hidden">PDF IA</span>
-            </button>
-
             <button
               type="button"
               onClick={() => setIsShortcutsModalOpen(true)}
@@ -3781,10 +4107,7 @@ ${textoPdf || '{{texto_pdf}}'}
               aria-label="Atajos de teclado globales"
             >
               <Keyboard className="w-3.5 h-3.5 text-amber-700" />
-              <span className="hidden md:inline">Atajos</span>
-              <kbd className="hidden xl:inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[10px] font-semibold text-slate-500">
-                Ctrl+/
-              </kbd>
+              <span className="hidden xl:inline">Atajos</span>
             </button>
 
             <LanguageSelector
@@ -3793,54 +4116,114 @@ ${textoPdf || '{{texto_pdf}}'}
             />
 
             {/* Reproducir Button: ONLY enabled when a real audiobook has been created or restored */}
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={openPlayerModal}
-                disabled={isGeneratingVideoBook || !hasCreatedVideoBook}
-                className={`px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                  isPlayerModalOpen
-                    ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
-                    : !isGeneratingVideoBook && hasCreatedVideoBook
-                      ? 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-                      : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                }`}
-                title={
-                  hasCreatedVideoBook
-                    ? 'Abrir la pantalla de reproducción de tu audiolibro creado'
-                    : 'Primero crea un audiolibro desde PDF o carga uno en Mi Biblioteca'
-                }
-              >
-                {isGeneratingVideoBook ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Creando voz y video...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>Reproducir</span>
-                    {hasCreatedVideoBook && videoBook.pages.length > 0 && (
-                      <span className="font-mono tabular-nums text-[11px] opacity-80">
-                        ({videoBook.pages.length})
-                      </span>
-                    )}
-                  </>
-                )}
-              </button>
-
-              {isBgPlaying && (
+            {(hasCreatedVideoBook || isGeneratingVideoBook) && (
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={stopBackgroundPlayback}
-                  className="p-2 rounded-lg bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 transition-colors cursor-pointer shrink-0"
-                  title="Detener audio en segundo plano"
-                  aria-label="Detener audio en segundo plano"
+                  onClick={openPlayerModal}
+                  disabled={isGeneratingVideoBook || !hasCreatedVideoBook}
+                  className={`px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                    isPlayerModalOpen
+                      ? 'bg-slate-950 hover:bg-slate-800 text-amber-400 border border-amber-500/60'
+                      : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                  }`}
+                  title="Abrir la pantalla de reproducción de tu audiolibro creado"
                 >
-                  <Square className="w-3.5 h-3.5 fill-current" />
+                  {isGeneratingVideoBook ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span className="hidden md:inline">Creando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span className="hidden sm:inline">Reproducir</span>
+                    </>
+                  )}
                 </button>
-              )}
-            </div>
+
+                {isBgPlaying && (
+                  <button
+                    type="button"
+                    onClick={stopBackgroundPlayback}
+                    className="p-2 rounded-lg bg-white hover:bg-rose-50 text-slate-600 hover:text-rose-700 border border-slate-200 transition-colors cursor-pointer shrink-0"
+                    title="Detener audio en segundo plano"
+                    aria-label="Detener audio en segundo plano"
+                  >
+                    <Square className="w-3.5 h-3.5 fill-current" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="h-5 w-px bg-slate-200 hidden sm:block" />
+
+            {/* Dedicated 1-Click Enter / Exit Admin Controls — Always Visible in Top Bar */}
+            {isVerifiedFirestoreAdmin ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openAdminSection(adminDashboardTab)}
+                  className={`px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border ${
+                    activeModule === 'admin-dashboard'
+                      ? 'bg-slate-950 text-amber-300 border-amber-500'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
+                  }`}
+                  title="Abrir el Panel de Administración completo"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span>Panel Admin</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleFirebaseSignOut()}
+                  className="px-3 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Cerrar sesión y salir del Modo Administrador"
+                >
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span className="hidden sm:inline">Salir Admin</span>
+                  <span className="sm:hidden">Salir</span>
+                </button>
+              </div>
+            ) : firebaseProfile ? (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => openAccountModal('account')}
+                  className="px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Ver Mi Cuenta y Mi Historial de Actividad"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                  <span className="hidden sm:inline">Mi Cuenta</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void handleFirebaseSignOut()}
+                  className="px-2.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1 bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                  title="Cerrar sesión para entrar con tu cuenta de Administrador"
+                >
+                  <LogOut className="w-3.5 h-3.5 shrink-0" />
+                  <span>Salir</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={isQuickSigningIn || isAuthLoading}
+                onClick={() => void handleQuickAdminSignIn()}
+                className="px-3.5 py-2 rounded-lg text-xs font-extrabold flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 text-amber-300 border border-amber-500/50 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-60"
+                title="Iniciar sesión con Google para entrar al Panel de Administración"
+              >
+                {isQuickSigningIn ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+                ) : (
+                  <LogIn className="w-3.5 h-3.5 shrink-0" />
+                )}
+                <span>{isQuickSigningIn ? 'Entrando...' : 'Entrar Admin'}</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -4002,9 +4385,14 @@ ${textoPdf || '{{texto_pdf}}'}
               monetizationSettings={monetizationSettings}
               isLoadingData={isLoadingAdminData}
               isPreviewingCustomerView={isPreviewingCustomerView}
+              activeTab={adminDashboardTab}
+              onTabChange={setAdminDashboardTab}
               onTogglePreviewCustomerView={() =>
                 setIsPreviewingCustomerView((prev) => !prev)
               }
+              onReturnToStudio={() => setActiveModule('videobook')}
+              onOpenActivityHistory={() => openAccountModal('history')}
+              onOpenShortcuts={() => setIsShortcutsModalOpen(true)}
               onSignOut={handleFirebaseSignOut}
               onNotify={(msg, type) => {
                 if (type === 'error') toast.error('Panel Admin', msg);
@@ -8035,10 +8423,13 @@ ${textoPdf || '{{texto_pdf}}'}
         </div>
       )}
 
-      {/* Administrator & Account Sign-In Modal (Firebase Google Auth) */}
+      {/* Administrator & Account Sign-In + Mi Historial de Actividad Modal */}
       <AdminControlModal
         isOpen={isAdminModalOpen}
-        onClose={() => setIsAdminModalOpen(false)}
+        onClose={() => {
+          setIsAdminModalOpen(false);
+          setAuthModalError(null);
+        }}
         firebaseProfile={firebaseProfile}
         isAdmin={isVerifiedFirestoreAdmin}
         isAuthLoading={isAuthLoading}
@@ -8048,9 +8439,21 @@ ${textoPdf || '{{texto_pdf}}'}
             ? () => setIsPreviewingCustomerView((prev) => !prev)
             : undefined
         }
-        onOpenAdminDashboard={() => setActiveModule('admin-dashboard')}
+        onOpenAdminDashboard={(tab) => openAdminSection(tab || 'users')}
+        onSignInWithGoogle={handleQuickAdminSignIn}
+        onSignOut={handleFirebaseSignOut}
         savedAudiobooksCount={savedAudiobooks.length}
         scriptHistoryCount={scriptHistory.length}
+        savedAudiobooks={savedAudiobooks}
+        scriptHistory={scriptHistory}
+        activityHistoryRefreshKey={activityHistoryRefreshKey}
+        initialTab={accountModalInitialTab}
+        initialAuthError={authModalError}
+        onNotify={(title, message, type) => {
+          if (type === 'error') toast.error(title, message);
+          else if (type === 'info') toast.info(title, message);
+          else toast.success(title, message);
+        }}
       />
 
       {/* Hyper-Futuristic Viral Gold Logo Showcase & Export Modal */}

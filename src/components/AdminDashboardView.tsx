@@ -27,6 +27,9 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  ArrowLeft,
+  History,
+  Keyboard,
 } from 'lucide-react';
 import { ConversionAnalyticsSection } from './ConversionAnalyticsSection';
 import {
@@ -44,6 +47,8 @@ import {
   resolvePromoBannerText,
 } from '../services/firebaseStudioService';
 
+export type AdminSubTab = 'users' | 'analytics' | 'activity' | 'orders' | 'profitability';
+
 interface AdminDashboardViewProps {
   users: StudioUserAccount[];
   usageEvents: StudioUsageEvent[];
@@ -51,12 +56,16 @@ interface AdminDashboardViewProps {
   monetizationSettings: MonetizationSettings;
   isLoadingData: boolean;
   isPreviewingCustomerView: boolean;
+  activeTab?: AdminSubTab;
+  onTabChange?: (tab: AdminSubTab) => void;
   onTogglePreviewCustomerView: () => void;
+  onReturnToStudio?: () => void;
+  onOpenActivityHistory?: () => void;
+  onOpenShortcuts?: () => void;
   onSignOut: () => void;
   onNotify?: (msg: string, type?: 'success' | 'info' | 'error') => void;
 }
 
-type AdminSubTab = 'users' | 'analytics' | 'activity' | 'orders' | 'profitability';
 type UserFilter = 'all' | 'paid' | 'active_using' | 'inactive' | 'free';
 
 const PLAN_LABELS: Record<PlanTier, string> = {
@@ -107,11 +116,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   monetizationSettings,
   isLoadingData,
   isPreviewingCustomerView,
+  activeTab: controlledActiveTab,
+  onTabChange,
   onTogglePreviewCustomerView,
+  onReturnToStudio,
+  onOpenActivityHistory,
+  onOpenShortcuts,
   onSignOut,
   onNotify,
 }) => {
-  const [activeTab, setActiveTab] = useState<AdminSubTab>('users');
+  const [internalActiveTab, setInternalActiveTab] = useState<AdminSubTab>('users');
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = (next: AdminSubTab) => {
+    setInternalActiveTab(next);
+    onTabChange?.(next);
+  };
   const [userFilter, setUserFilter] = useState<UserFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -325,10 +344,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {onReturnToStudio && (
+              <button
+                type="button"
+                onClick={onReturnToStudio}
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/15 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              >
+                <ArrowLeft className="w-4 h-4 text-amber-300" />
+                <span>Volver al Estudio</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleCopyShareUrl}
-              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
             >
               {copiedLink ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               <span>{copiedLink ? 'Enlace Copiado' : 'Copiar Link para Clientes'}</span>
@@ -337,7 +367,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             <button
               type="button"
               onClick={onTogglePreviewCustomerView}
-              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border cursor-pointer transition-colors ${
+              className={`px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border cursor-pointer transition-colors whitespace-nowrap ${
                 isPreviewingCustomerView
                   ? 'bg-amber-500/20 text-amber-200 border-amber-400'
                   : 'bg-white/10 hover:bg-white/15 text-slate-200 border-white/15'
@@ -354,13 +384,38 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               </span>
             </button>
 
+            {onOpenActivityHistory && (
+              <button
+                type="button"
+                onClick={onOpenActivityHistory}
+                className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+                title="Abrir Mi Historial de Actividad y descargas locales en IndexedDB"
+              >
+                <History className="w-4 h-4 text-amber-300" />
+                <span>Mi Historial</span>
+              </button>
+            )}
+
+            {onOpenShortcuts && (
+              <button
+                type="button"
+                onClick={onOpenShortcuts}
+                className="px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+                title="Ver lista de atajos de teclado globales"
+              >
+                <Keyboard className="w-4 h-4 text-amber-300" />
+                <span>Atajos</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={onSignOut}
-              className="px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-rose-500/20 text-slate-200 hover:text-rose-200 border border-white/10 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+              className="px-3.5 py-2.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-100 border border-rose-400/40 text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-colors whitespace-nowrap"
+              title="Cerrar sesión de Administrador y salir al modo invitado"
             >
               <LogOut className="w-4 h-4" />
-              <span>Salir</span>
+              <span>Salir de Admin</span>
             </button>
           </div>
         </div>
@@ -467,7 +522,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           },
           {
             id: 'profitability' as const,
-            label: 'Configuración de Tarifas',
+            label: 'Tarifas y Cuota Gratis',
             icon: Sliders,
           },
         ].map((tab) => {
@@ -478,7 +533,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-colors cursor-pointer border ${
+              className={`px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-2 transition-colors cursor-pointer border whitespace-nowrap ${
                 active
                   ? 'bg-slate-950 text-amber-400 border-amber-500/60'
                   : 'bg-white text-slate-700 hover:bg-amber-50 border-slate-200'

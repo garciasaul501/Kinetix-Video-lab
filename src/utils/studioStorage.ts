@@ -69,7 +69,25 @@ const AUDIOBOOK_FOLDER_META_KEY = 'kinetix_audiobook_folder_meta_v1';
 const AUDIOBOOK_CUSTOM_FOLDERS_KEY = 'kinetix_audiobook_custom_folders_v1';
 
 const IDB_NAME = 'kinetix_audiobook_media_vault_v1';
+const IDB_VERSION = 2;
 const IDB_STORE = 'media_blobs';
+const IDB_ACTIVITY_STORE = 'activity_history';
+
+export type ActivityAssetCategory = 'audiobook' | 'script' | 'video';
+
+export interface UserActivityExportRecord {
+  id: string;
+  category: ActivityAssetCategory;
+  title: string;
+  subtitle: string;
+  format: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  blobKey: string;
+  createdAtMs: number;
+  moduleLabel: string;
+}
 
 export const DEFAULT_AUDIOBOOK_FOLDERS = [
   'Negocios & Liderazgo',
@@ -435,11 +453,15 @@ function openMediaVaultDb(): Promise<IDBDatabase> {
       reject(new Error('IndexedDB no disponible'));
       return;
     }
-    const req = window.indexedDB.open(IDB_NAME, 1);
+    const req = window.indexedDB.open(IDB_NAME, IDB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(IDB_STORE)) {
         db.createObjectStore(IDB_STORE);
+      }
+      if (!db.objectStoreNames.contains(IDB_ACTIVITY_STORE)) {
+        const actStore = db.createObjectStore(IDB_ACTIVITY_STORE, { keyPath: 'id' });
+        actStore.createIndex('createdAtMs', 'createdAtMs', { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -486,6 +508,164 @@ export async function deleteMediaBlobsFromIdb(itemId: string): Promise<void> {
       const store = tx.objectStore(IDB_STORE);
       store.delete(`${itemId}:mp4`);
       store.delete(`${itemId}:mp3`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+    db.close();
+  } catch (_err) {
+    // Ignore
+  }
+}
+
+export function buildScriptExportBlob(
+  script: GeneratedScriptData,
+  meta?: { topic?: string; tone?: string; targetAudience?: string }
+): Blob {
+  const divider = '========================================================================';
+  const subDivider = '------------------------------------------------------------------------';
+  const lines: string[] = [
+    divider,
+    'KINETIX ESTUDIO IA — GUION DE PRODUCCIÓN',
+    divider,
+    `TÍTULO: ${script.title || 'Guion Sin Título'}`,
+    `DURACIÓN: ${script.totalDuration || '02:00'}`,
+    meta?.topic ? `TEMA: ${meta.topic}` : '',
+    meta?.tone ? `TONO: ${meta.tone}` : '',
+    meta?.targetAudience ? `AUDIENCIA: ${meta.targetAudience}` : '',
+    `LOGLINE: ${script.logline || ''}`,
+    '',
+    subDivider,
+    'NARRACIÓN COMPLETA (VOICEOVER)',
+    subDivider,
+    script.fullNarration || '',
+    '',
+    subDivider,
+    'DESGLOSE DE ESCENAS',
+    subDivider,
+  ].filter((l, idx) => l !== '' || idx > 7);
+
+  for (const sc of script.scenes || []) {
+    lines.push(
+      `[Escena ${sc.sceneNumber} · ${sc.timecode}] ${sc.title}`,
+      `Visual: ${sc.visualDescription}`,
+      `Estilo: ${sc.visualStyle} | Cámara: ${sc.cameraDirection}`,
+      `Narración: ${sc.narrationText}`,
+      `Diseño sonoro: ${sc.soundDesign}`,
+      ''
+    );
+  }
+
+  return new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+}
+
+export async function saveActivityExportToIdb(
+  input: Omit<UserActivityExportRecord, 'id' | 'blobKey' | 'sizeBytes' | 'createdAtMs'> & {
+    id?: string;
+    blobKey?: string;
+    createdAtMs?: number;
+  },
+  blob: Blob
+): Promise<UserActivityExportRecord | null> {
+  try {
+    const id = input.id || `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const blobKey = input.blobKey || `activity:${id}`;
+    const record: UserActivityExportRecord = {
+      id,
+      category: input.category,
+      title: (input.title || 'Archivo Exportado').slice(0, 140),
+      subtitle: (input.subtitle || '').slice(0, 180),
+      format: (input.format || 'FILE').toUpperCase().slice(0, 20),
+      fileName: input.fileName || `${id}.bin`,
+      mimeType: input.mimeType || blob.type || 'application/octet-stream',
+      sizeBytes: blob.size || 0,
+      blobKey,
+      createdAtMs: input.createdAtMs || Date.now(),
+      moduleLabel: input.moduleLabel || 'Estudio IA',
+    };
+
+    const db = await openMediaVaultDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([IDB_STORE, IDB_ACTIVITY_STORE], 'readwrite');
+      tx.objectStore(IDB_STORE).put(blob, blobKey);
+      tx.objectStore(IDB_ACTIVITY_STORE).put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    return record;
+  } catch (_err) {
+    return null;
+  }
+}
+
+export async function listActivityExportsFromIdb(): Promise<UserActivityExportRecord[]> {
+  try {
+    const db = await openMediaVaultDb();
+    const records = await new Promise<UserActivityExportRecord[]>((resolve, reject) => {
+      const tx = db.transaction(IDB_ACTIVITY_STORE, 'readonly');
+      const getAllReq = tx.objectStore(IDB_ACTIVITY_STORE).getAll();
+      getAllReq.onsuccess = () =>
+        resolve(Array.isArray(getAllReq.result) ? (getAllReq.result as UserActivityExportRecord[]) : []);
+      getAllReq.onerror = () => reject(getAllReq.error);
+    });
+    db.close();
+    records.sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
+    return records;
+  } catch (_err) {
+    return [];
+  }
+}
+
+export async function downloadActivityExportFromIdb(
+  record: UserActivityExportRecord
+): Promise<boolean> {
+  const blob = await getMediaBlobFromIdb(record.blobKey);
+  if (!blob) return false;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = record.fileName || 'kinetix-export';
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  return true;
+}
+
+export async function deleteActivityExportFromIdb(
+  record: UserActivityExportRecord
+): Promise<void> {
+  try {
+    const db = await openMediaVaultDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction([IDB_STORE, IDB_ACTIVITY_STORE], 'readwrite');
+      tx.objectStore(IDB_ACTIVITY_STORE).delete(record.id);
+      if (record.blobKey.startsWith('activity:')) {
+        tx.objectStore(IDB_STORE).delete(record.blobKey);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+    db.close();
+  } catch (_err) {
+    // Ignore
+  }
+}
+
+export async function clearAllActivityExportsFromIdb(): Promise<void> {
+  try {
+    const existing = await listActivityExportsFromIdb();
+    const db = await openMediaVaultDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction([IDB_STORE, IDB_ACTIVITY_STORE], 'readwrite');
+      const actStore = tx.objectStore(IDB_ACTIVITY_STORE);
+      const blobStore = tx.objectStore(IDB_STORE);
+      for (const rec of existing) {
+        if (rec.blobKey.startsWith('activity:')) {
+          blobStore.delete(rec.blobKey);
+        }
+      }
+      actStore.clear();
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
     });

@@ -19,9 +19,12 @@ const __dirname = path.dirname(__filename);
 
 // ============================================================================
 // ADMINISTRATOR ACCOUNT & STUDIO AUTHENTICATION STORE
+// Primary Admin RBAC is handled via Firebase Authentication & Firestore rules.
 // ============================================================================
-const MASTER_ADMIN_EMAIL = 'garciasaul501@gmail.com';
-const MASTER_ADMIN_PASS = 'Garciasaul@501';
+const MASTER_ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim();
+const MASTER_ADMIN_PASS = (process.env.ADMIN_PASSWORD || '').trim();
+const ADMIN_SIGNING_SECRET =
+  (process.env.ADMIN_SESSION_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
 const ADMIN_STORE_PATH = path.join(os.tmpdir(), 'kinetix-studio-admin-users.json');
 
 interface StoredStudioUser {
@@ -45,30 +48,61 @@ function createSignedToken(email: string, role: string): string {
     JSON.stringify({ email: email.toLowerCase(), role, iat: Date.now() })
   ).toString('base64url');
   const sig = crypto
-    .createHmac('sha256', 'kinetix-studio-admin-secret-2026')
+    .createHmac('sha256', ADMIN_SIGNING_SECRET)
     .update(payload)
     .digest('base64url');
   return `${payload}.${sig}`;
 }
 
+function verifySignedToken(authHeader: string): { email: string; role: string } | null {
+  if (!authHeader.startsWith('Bearer ')) return null;
+  const rawToken = authHeader.slice(7).trim();
+  const dotIdx = rawToken.indexOf('.');
+  if (dotIdx <= 0) return null;
+  const payload = rawToken.slice(0, dotIdx);
+  const sig = rawToken.slice(dotIdx + 1);
+  const expectedSig = crypto
+    .createHmac('sha256', ADMIN_SIGNING_SECRET)
+    .update(payload)
+    .digest('base64url');
+  const sigBuf = Buffer.from(sig);
+  const expBuf = Buffer.from(expectedSig);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (typeof parsed?.email === 'string' && typeof parsed?.role === 'string') {
+      return { email: parsed.email, role: parsed.role };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 function loadStudioUsers(): StoredStudioUser[] {
   const defaultSalt = 'kinetix-master-salt-501';
-  const masterAdmin: StoredStudioUser = {
-    id: 'admin-master-01',
-    email: MASTER_ADMIN_EMAIL,
-    name: 'Saúl García (Administrador Principal)',
-    role: 'admin',
-    plan: 'Enterprise Master · Ilimitado',
-    status: 'active',
-    salt: defaultSalt,
-    passwordHash: hashPasswordWithSalt(MASTER_ADMIN_PASS, defaultSalt),
-    createdAt: '2026-10-20',
-  };
+  const masterAdmin: StoredStudioUser | null =
+    MASTER_ADMIN_EMAIL && MASTER_ADMIN_PASS
+      ? {
+          id: 'admin-master-01',
+          email: MASTER_ADMIN_EMAIL,
+          name: 'Administrador Principal',
+          role: 'admin',
+          plan: 'Enterprise Master · Ilimitado',
+          status: 'active',
+          salt: defaultSalt,
+          passwordHash: hashPasswordWithSalt(MASTER_ADMIN_PASS, defaultSalt),
+          createdAt: '2026-10-20',
+        }
+      : null;
 
   try {
     if (fs.existsSync(ADMIN_STORE_PATH)) {
       const raw = JSON.parse(fs.readFileSync(ADMIN_STORE_PATH, 'utf8'));
       if (Array.isArray(raw) && raw.length > 0) {
+        if (!masterAdmin) return raw;
         const hasMaster = raw.some(
           (u: StoredStudioUser) => u.email.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()
         );
@@ -76,9 +110,9 @@ function loadStudioUsers(): StoredStudioUser[] {
       }
     }
   } catch (_e) {
-    // Fallback to default master admin
+    // Fallback below
   }
-  return [masterAdmin];
+  return masterAdmin ? [masterAdmin] : [];
 }
 
 function saveStudioUsers(users: StoredStudioUser[]): void {
@@ -2075,7 +2109,9 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
 
       const computedHash = hashPasswordWithSalt(rawPass, matched.salt);
       const isMasterMatch =
-        cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() && rawPass === MASTER_ADMIN_PASS;
+        Boolean(MASTER_ADMIN_EMAIL && MASTER_ADMIN_PASS) &&
+        cleanEmail === MASTER_ADMIN_EMAIL.toLowerCase() &&
+        rawPass === MASTER_ADMIN_PASS;
 
       if (computedHash !== matched.passwordHash && !isMasterMatch) {
         res.status(401).json({
@@ -2085,8 +2121,13 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       }
 
       const token = createSignedToken(matched.email, matched.role);
-      const publicUsers = users.map(({ salt: _s, passwordHash: _p, ...rest }) => rest);
-      const { salt: _s, passwordHash: _p, ...publicProfile } = matched;
+      const sanitizePublicUser = ({ salt: _s, passwordHash: _p, ...rest }: StoredStudioUser) => ({
+        ...rest,
+        name: rest.id === 'admin-master-01' ? 'Administrador Principal' : rest.name,
+        email: rest.id === 'admin-master-01' ? 'admin@kinetix.studio' : rest.email,
+      });
+      const publicUsers = users.map(sanitizePublicUser);
+      const publicProfile = sanitizePublicUser(matched);
 
       res.json({
         session: {
@@ -2101,18 +2142,36 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
     }
   });
 
-  app.get('/api/auth/me', (_req, res) => {
+  app.get('/api/auth/me', (req, res) => {
+    const verified = verifySignedToken(String(req.headers.authorization || ''));
+    if (!verified) {
+      res.status(401).json({ error: 'Sesión no autenticada.' });
+      return;
+    }
     const users = loadStudioUsers();
-    const master = users[0];
-    const { salt: _s, passwordHash: _p, ...publicProfile } = master;
+    const matched = users.find((u) => u.email.toLowerCase() === verified.email.toLowerCase());
+    if (!matched) {
+      res.status(404).json({ error: 'Usuario no encontrado.' });
+      return;
+    }
+    const sanitizePublicUser = ({ salt: _s, passwordHash: _p, ...rest }: StoredStudioUser) => ({
+      ...rest,
+      name: rest.id === 'admin-master-01' ? 'Administrador Principal' : rest.name,
+      email: rest.id === 'admin-master-01' ? 'admin@kinetix.studio' : rest.email,
+    });
     res.json({
-      user: publicProfile,
-      users: users.map(({ salt: _s2, passwordHash: _p2, ...rest }) => rest),
+      user: sanitizePublicUser(matched),
+      users: verified.role === 'admin' ? users.map(sanitizePublicUser) : [],
     });
   });
 
   app.post('/api/admin/users', (req, res) => {
     try {
+      const verified = verifySignedToken(String(req.headers.authorization || ''));
+      if (!verified || verified.role !== 'admin') {
+        res.status(403).json({ error: 'Solo un administrador autenticado puede gestionar usuarios.' });
+        return;
+      }
       const { email, name, password, role } = req.body || {};
       const cleanEmail = String(email || '').trim().toLowerCase();
       const rawPass = String(password || '').trim();
@@ -2144,7 +2203,11 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       saveStudioUsers(users);
 
       res.json({
-        users: users.map(({ salt: _s, passwordHash: _p, ...rest }) => rest),
+        users: users.map(({ salt: _s, passwordHash: _p, ...rest }) => ({
+          ...rest,
+          name: rest.id === 'admin-master-01' ? 'Administrador Principal' : rest.name,
+          email: rest.id === 'admin-master-01' ? 'admin@kinetix.studio' : rest.email,
+        })),
       });
     } catch (_err) {
       res.status(500).json({ error: 'No se pudo guardar el usuario.' });
@@ -2172,11 +2235,11 @@ Genera una salida limpia, exhaustiva y lista para enviar a locución y generaci�
       '5. Voces IA: Locución neuronal 24kHz en español con múltiples acentos y tonos.\n' +
       '6. Videos Sin Límite MP4: Renderizado de video completo con subtítulos y avatar en vivo.\n' +
       '7. Modelo Letras Oro: Modo moderno con tipografía en oro 24K.\n' +
-      '8. Acceso Admin: Inicio de sesión con garciasaul501@gmail.com / Garciasaul@501.';
+      '8. Acceso Admin: Panel administrativo protegido en la barra lateral.';
     const toneOfVoice =
       'Empático, ágil, profesional, concierge de Customer Success, entusiasta y orientado a la acción inmediata.';
     const supportChannel =
-      'garciasaul501@gmail.com y el botón Acceso Admin en la barra superior.';
+      'el centro de soporte oficial dentro de Kinetix Estudio IA.';
 
     const systemInstruction = `ROL Y IDENTIDAD
 Eres el Asistente Oficial de Soporte y Onboarding de ${appName}. Tu misión principal es actuar como un concierge interactivo de Customer Success: dar la bienvenida a nuevos usuarios, resolver dudas operativas en tiempo real, guiarlos paso a paso a través de la interfaz y ayudarlos a alcanzar valor con el producto en el menor tiempo posible.
@@ -2192,10 +2255,11 @@ ${keyFeatures}
 1. Diagnóstico Rápido: Identifica el objetivo exacto o punto de fricción del usuario. Si la duda es ambigua, haz una pregunta de clarificación con opciones cerradas.
 2. Instrucciones Accionables: Responde utilizando listas numeradas cortas indicando la ruta exacta dentro de la interfaz (ej. Ve a Menú > Audiolibros & PDF > Subir PDF).
 3. Proactividad / Next Best Action: Al resolver la duda, sugiere el siguiente paso lógico para asegurar que el usuario complete su flujo de trabajo exitosamente.
-4. Protocolo de Escalación: Si el usuario reporta un bug crítico, solicita una devolución o no puedes resolver la consulta tras dos intentos, proporciona el canal oficial de soporte: ${supportChannel}.
+4. Protocolo de Escalación: Si el usuario reporta un bug crítico, solicita una devolución o no puedes resolver la consulta tras dos intentos, dirígelo a ${supportChannel}.
 
 # REGLAS NEGATIVAS Y RESTRICCIONES
 - NUNCA inventes funciones, botones o integraciones que no pertenezcan a ${appName}.
+- NUNCA reveles correos electrónicos personales, contraseñas ni datos privados del propietario o administrador.
 - NUNCA des respuestas teóricas largas; prioriza micro-pasos guiados y viñetas concisas (máximo 120 palabras por respuesta regular).
 - No uses jerga técnica interna de desarrollo salvo que el usuario sea perfil técnico.
 - Mantén siempre una postura empática, paciente y orientada a la solución.
@@ -2276,14 +2340,14 @@ ${keyFeatures}
         'Al estar activo, todos los títulos, insignias y subtítulos brillarán en oro 24K.'
       ];
       tip = 'El estilo dorado también se refleja en la exportación de video de tus audiolibros.';
-    } else if (lower.includes('admin') || lower.includes('cuenta') || lower.includes('saul') || lower.includes('login')) {
-      direct = 'La cuenta de administrador maestro está configurada con acceso completo ilimitado.';
+    } else if (lower.includes('admin') || lower.includes('cuenta') || lower.includes('login')) {
+      direct = 'El panel de administrador cuenta con acceso protegido mediante credenciales autorizadas.';
       steps = [
-        'Haz clic en el botón **Acceso Admin** en la esquina superior derecha del menú.',
-        'Ingresa el email: **garciasaul501@gmail.com** y contraseña: **Garciasaul@501**.',
-        'Haz clic en **Ingresar al Panel** para gestionar usuarios y métricas.'
+        'Haz clic en el botón **Admin** en la barra lateral.',
+        'Ingresa tu correo y contraseña de administrador autorizados.',
+        'Haz clic en **Iniciar Sesión como Administrador** para gestionar usuarios y métricas.'
       ];
-      tip = 'La sesión se guarda automáticamente en tu navegador para que no tengas que escribirla cada vez.';
+      tip = 'Por seguridad y privacidad, las credenciales personales nunca se muestran en pantalla.';
     } else if (lower.includes('nicho') || lower.includes('foto') || lower.includes('1200') || lower.includes('imagen')) {
       direct = 'Cuentas con una galería de +1,200 fotografías cinematográficas organizadas en 12 nichos temáticos.';
       steps = [
@@ -2297,7 +2361,7 @@ ${keyFeatures}
       steps = [
         'Explora los módulos en la barra superior: **Audiolibros & PDF**, **1,200 Fotos**, **Guiones** o **Storyboard**.',
         'Si tienes una duda específica sobre un paso, escríbela o díctala aquí con el micrófono.',
-        'Si necesitas asistencia humana o reportar un error, escribe a: **garciasaul501@gmail.com**.'
+        'Usa los botones rápidos de abajo para saltar directamente al módulo que necesitas.'
       ];
       tip = '¿Qué proyecto audiovisual o audiolibro te gustaría crear hoy?';
     }
@@ -2332,7 +2396,7 @@ FUNCIONES REALES ACTUALES DEL ESTUDIO:
 2. **Crear PDF Completo con IA**: Botón visible arriba en la barra superior, barra de comandos y pestaña "3. Crear PDF Completo con IA". Genera documentos completos con texto, imágenes, voz 24kHz, subtítulos, descarga PDF/TXT/MP3/MP4 y monetización.
 3. **Prueba por solo $5 DLL (Acceso Limitado con PayPal Real)**:
    - Botón **"Prueba por solo $5 DLL"** en la barra superior.
-   - Pago real en USD dirigido a la cuenta oficial de PayPal (${PAYPAL_RECEIVER_ACCOUNT}).
+   - Pago real seguro en USD procesado directamente con PayPal Oficial.
    - Acredita **Acceso Limitado por 7 días** + **62,500 Tokens** + hasta **5 proyectos completos** (Audiolibros, PDFs IA y exportaciones MP3/MP4).
    - También existen planes de recarga ($10, $25, $50 USD) y suscripciones Pro ($9.99/mes, $19.99/mes, $149/año) en **"EMPIEZA AHORA · BOTÓN ACCESO"**.
 4. **Mi Biblioteca**: Guarda audiolibros en carpetas, reproduce creados y exporta lotes en ZIP (MP3 + MP4).
@@ -2348,7 +2412,7 @@ REGLAS:
 - Sé amable, directo y concreto (máximo 110 palabras).
 - Indica nombres exactos de botones entre **negritas**.
 - Siempre termina sugiriendo el siguiente paso concreto.
-- Nunca inventes funciones inexistentes ni pidas claves API al usuario.`;
+- Nunca inventes funciones inexistentes, nunca pidas claves API y NUNCA muestres correos electrónicos personales ni datos privados del propietario.`;
 
     try {
       const ai = getGenAIClient();
@@ -2843,7 +2907,7 @@ REGLAS:
     res.json({
       success: true,
       packages: TOKEN_PACKAGES_SERVER.slice(0, 4),
-      receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
+      merchantName: 'Kinetix Studio Oficial',
       currency: 'USD',
     });
   });
@@ -2857,7 +2921,7 @@ REGLAS:
     res.json({
       success: true,
       configured: Boolean(PAYPAL_RECEIVER_ACCOUNT && PAYPAL_RECEIVER_ACCOUNT.includes('@')),
-      receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
+      merchantName: 'Kinetix Studio Oficial',
       currency: 'USD',
       liveCheckoutMode:
         process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET
@@ -2960,7 +3024,7 @@ REGLAS:
         success: true,
         orderId,
         checkoutUrl,
-        receiverAccount: PAYPAL_RECEIVER_ACCOUNT,
+        merchantName: 'Kinetix Studio Oficial',
         amount: finalAmount,
         tokens: finalTokens,
         accessTier: pkg.accessTier,
@@ -3026,7 +3090,7 @@ REGLAS:
       accessDays: order.accessDays,
       maxProjects: order.maxProjects,
       expiresAt: order.expiresAt,
-      receiverAccount: order.receiverAccount,
+      merchantName: 'Kinetix Studio Oficial',
       paypalTxId: order.paypalTxId || null,
       status: 'completed',
     });

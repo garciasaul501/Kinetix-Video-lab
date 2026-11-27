@@ -55,6 +55,7 @@ export interface GuideChatBotProps {
   hasLoadedText: boolean;
   accessTier: string;
   userTokenBalance: number;
+  isPureAdminMode?: boolean;
   onExecuteAction: (action: GuideActionType) => void;
 }
 
@@ -71,6 +72,7 @@ export const GuideChatBot: React.FC<GuideChatBotProps> = ({
   hasLoadedText,
   accessTier,
   userTokenBalance,
+  isPureAdminMode = false,
   onExecuteAction,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -310,6 +312,14 @@ export const GuideChatBot: React.FC<GuideChatBotProps> = ({
     },
   ];
 
+  const visibleTourSteps = isPureAdminMode
+    ? tourSteps.filter((st) => st.action !== 'open-trial' && st.action !== 'paypal-monetization')
+    : tourSteps;
+
+  const visibleQuickStarters = isPureAdminMode
+    ? QUICK_STARTERS.filter((q) => !q.includes('$5') && !q.toLowerCase().includes('paypal'))
+    : QUICK_STARTERS;
+
   return (
     <>
       {/* Floating Always-Visible Guide Chat Bot Trigger Button */}
@@ -394,17 +404,19 @@ export const GuideChatBot: React.FC<GuideChatBotProps> = ({
               }`}
             >
               <Compass className="w-3.5 h-3.5" />
-              <span>Tour 5 Pasos</span>
+              <span>{isPureAdminMode ? 'Tour 4 Pasos' : 'Tour 5 Pasos'}</span>
             </button>
           </div>
 
           {activeTab === 'tour' ? (
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5 bg-white">
               <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 font-semibold">
-                Sigue estos 5 pasos reales para crear, reproducir y monetizar hoy mismo:
+                {isPureAdminMode
+                  ? 'Flujo rápido creativo para producir audiolibros, PDFs con IA y video:'
+                  : 'Sigue estos 5 pasos reales para crear, reproducir y monetizar hoy mismo:'}
               </div>
 
-              {tourSteps.map((st) => (
+              {visibleTourSteps.map((st) => (
                 <div
                   key={st.id}
                   className={`p-3 rounded-xl border transition-colors ${
@@ -518,17 +530,24 @@ export const GuideChatBot: React.FC<GuideChatBotProps> = ({
 
                       {!isUser && msg.suggestedActions && msg.suggestedActions.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-1.5 max-w-[92%]">
-                          {msg.suggestedActions.map((act, idx) => (
-                            <button
-                              key={`${msg.id}-act-${idx}`}
-                              type="button"
-                              onClick={() => onExecuteAction(act.actionType)}
-                              className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500 hover:text-slate-950 text-amber-950 border border-amber-300 text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer"
-                            >
-                              <Sparkles className="w-3 h-3 shrink-0" />
-                              <span>{act.label}</span>
-                            </button>
-                          ))}
+                          {msg.suggestedActions
+                            .filter(
+                              (act) =>
+                                !isPureAdminMode ||
+                                (act.actionType !== 'open-trial' &&
+                                  act.actionType !== 'paypal-monetization')
+                            )
+                            .map((act, idx) => (
+                              <button
+                                key={`${msg.id}-act-${idx}`}
+                                type="button"
+                                onClick={() => onExecuteAction(act.actionType)}
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500 hover:text-slate-950 text-amber-950 border border-amber-300 text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer"
+                              >
+                                <Sparkles className="w-3 h-3 shrink-0" />
+                                <span>{act.label}</span>
+                              </button>
+                            ))}
                         </div>
                       )}
                     </div>
@@ -547,7 +566,7 @@ export const GuideChatBot: React.FC<GuideChatBotProps> = ({
 
               {/* Quick Question Chips */}
               <div className="px-3 py-2 bg-white border-t border-slate-100 flex gap-1.5 overflow-x-auto shrink-0">
-                {QUICK_STARTERS.map((q) => (
+                {visibleQuickStarters.map((q) => (
                   <button
                     key={q}
                     type="button"

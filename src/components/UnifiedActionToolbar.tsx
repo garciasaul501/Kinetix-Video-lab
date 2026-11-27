@@ -8,8 +8,10 @@ import {
   RefreshCw,
   Zap,
   FilePlus2,
+  Eye,
 } from 'lucide-react';
 import { SupportedLanguage, t } from '../utils/i18n';
+import { formatUsdPrice } from '../services/firebaseStudioService';
 
 export interface UnifiedActionToolbarProps {
   onCrear: () => void;
@@ -22,6 +24,10 @@ export interface UnifiedActionToolbarProps {
   onConvertir: () => void;
   onMonetizar: () => void;
   onTestearPago: () => void;
+  onOpenAdminDashboard?: () => void;
+  onToggleCustomerView?: () => void;
+  isAdminMode?: boolean;
+  trialPriceUsd?: number;
   userTokenBalance: number;
   isGenerating?: boolean;
   isPlayingBg?: boolean;
@@ -40,6 +46,10 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
   onConvertir,
   onMonetizar,
   onTestearPago,
+  onOpenAdminDashboard,
+  onToggleCustomerView,
+  isAdminMode = false,
+  trialPriceUsd = 5,
   userTokenBalance,
   isGenerating = false,
   isPlayingBg = false,
@@ -168,31 +178,63 @@ export const UnifiedActionToolbar: React.FC<UnifiedActionToolbarProps> = ({
         )}
       </div>
 
-      {/* Right: Token balance + Quick Access / Test Payment */}
+      {/* Right: Admin Mode (no subscriber upsells) vs Customer Mode */}
       <div className="flex items-center gap-2.5 shrink-0">
-        <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-mono tabular-nums font-bold text-amber-800 pr-2 border-r border-slate-200">
-          <span>{userTokenBalance.toLocaleString()}</span>
-          <span className="font-sans font-medium text-slate-500">{t('tokensBadge', language)}</span>
-        </span>
+        {isAdminMode ? (
+          <>
+            <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800">
+              <span>ADMIN · Ilimitado</span>
+            </span>
+            {onToggleCustomerView && (
+              <button
+                type="button"
+                onClick={onToggleCustomerView}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-amber-50 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                title="Activar manualmente el modo Vista de Cliente para previsualizar las opciones de suscriptor"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Vista de Cliente</span>
+              </button>
+            )}
+            {onOpenAdminDashboard && (
+              <button
+                type="button"
+                onClick={onOpenAdminDashboard}
+                className="px-3.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-amber-300 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0 border border-amber-500/40"
+              >
+                <span>Panel Suscriptores y Uso</span>
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <span className="hidden md:inline-flex items-center gap-1.5 text-xs font-mono tabular-nums font-bold text-amber-800 pr-2 border-r border-slate-200">
+              <span>{userTokenBalance.toLocaleString()}</span>
+              <span className="font-sans font-medium text-slate-500">{t('tokensBadge', language)}</span>
+            </span>
 
-        <button
-          type="button"
-          onClick={onTestearPago}
-          className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          title="Prueba por solo $5 DLL — Acceso limitado por 7 días + 62,500 Tokens vía PayPal"
-        >
-          {t('testRealPayment', language)}
-        </button>
+            <button
+              type="button"
+              onClick={onTestearPago}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold text-amber-950 bg-amber-50 hover:bg-amber-100 border border-amber-400 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title={`Prueba por solo $${formatUsdPrice(trialPriceUsd)} DLL — Acceso limitado por 7 días + 62,500 Tokens vía PayPal`}
+            >
+              {language === 'es'
+                ? `Prueba por solo $${formatUsdPrice(trialPriceUsd)} DLL`
+                : t('testRealPayment', language)}
+            </button>
 
-        <button
-          type="button"
-          onClick={onMonetizar}
-          className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          title="Empieza ahora antes de usar o ver - Botón Acceso"
-        >
-          <Zap className="w-3.5 h-3.5 fill-current" />
-          <span>{t('btnAcceso', language) || 'EMPIEZA AHORA · BOTÓN ACCESO'}</span>
-        </button>
+            <button
+              type="button"
+              onClick={onMonetizar}
+              className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Empieza ahora antes de usar o ver - Botón Acceso"
+            >
+              <Zap className="w-3.5 h-3.5 fill-current" />
+              <span>{t('btnAcceso', language) || 'EMPIEZA AHORA · BOTÓN ACCESO'}</span>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

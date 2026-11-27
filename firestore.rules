@@ -1,0 +1,364 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 0: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // GLOBAL HARDENED PRIMITIVES
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    // Token-only bootstrapped owner check (zero DB reads)
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'garciasaul501@gmail.com';
+    }
+
+    // Explicit Firestore role == 'admin' verification on /users/{uid}
+    function hasAdminUserRole() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Full RBAC admin check enforcing Firestore role == 'admin'
+    function isAdmin() {
+      return isBootstrappedAdmin() || hasAdminUserRole() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'admin'
+      );
+    }
+
+    // =========================================================================
+    // ENTITY VALIDATION BLUEPRINTS (Pillar 2 - Anti-Update-Gap)
+    // =========================================================================
+    function isValidAdminRegistry(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.role is string && data.role == 'admin' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUserAccount(data) {
+      return data.keys().hasAll([
+          'uid', 'displayName', 'email', 'role', 'planTier', 'subscriptionStatus',
+          'tokenBalance', 'projectsCreated', 'audiobooksCreated', 'pdfsCreated',
+          'sessionsCount', 'lastModuleUsed', 'lastOrderId', 'lastActiveAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'uid', 'displayName', 'email', 'role', 'planTier', 'subscriptionStatus',
+          'tokenBalance', 'projectsCreated', 'audiobooksCreated', 'pdfsCreated',
+          'sessionsCount', 'lastModuleUsed', 'lastOrderId', 'lastActiveAt', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 160 &&
+        data.role is string && data.role in ['subscriber', 'admin'] &&
+        data.planTier is string && data.planTier in ['free', 'limited_trial', 'starter', 'pro', 'vip'] &&
+        data.subscriptionStatus is string && data.subscriptionStatus in ['inactive', 'active', 'expired', 'suspended'] &&
+        data.tokenBalance is number && data.tokenBalance >= 0 && data.tokenBalance <= 50000000 &&
+        data.projectsCreated is number && data.projectsCreated >= 0 && data.projectsCreated <= 100000 &&
+        data.audiobooksCreated is number && data.audiobooksCreated >= 0 && data.audiobooksCreated <= 100000 &&
+        data.pdfsCreated is number && data.pdfsCreated >= 0 && data.pdfsCreated <= 100000 &&
+        data.sessionsCount is number && data.sessionsCount >= 0 && data.sessionsCount <= 1000000 &&
+        data.lastModuleUsed is string && data.lastModuleUsed.size() >= 1 && data.lastModuleUsed.size() <= 64 &&
+        data.lastOrderId is string && data.lastOrderId.size() >= 0 && data.lastOrderId.size() <= 128 &&
+        data.lastActiveAt is timestamp &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidUsageEvent(data) {
+      return data.keys().hasAll(['userId', 'userLabel', 'eventType', 'moduleId', 'summary', 'createdAt']) &&
+        data.keys().hasOnly(['userId', 'userLabel', 'eventType', 'moduleId', 'summary', 'createdAt']) &&
+        isValidId(data.userId) &&
+        data.userLabel is string && data.userLabel.size() >= 1 && data.userLabel.size() <= 120 &&
+        data.eventType is string && data.eventType in [
+          'session_start', 'audiobook_created', 'pdf_created',
+          'voice_generated', 'video_exported', 'checkout_opened', 'subscription_activated'
+        ] &&
+        data.moduleId is string && data.moduleId.size() >= 1 && data.moduleId.size() <= 64 &&
+        data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 240 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidSubscriptionOrder(data) {
+      return data.keys().hasAll([
+          'orderId', 'userId', 'userLabel', 'packageId', 'packageTitle',
+          'planTier', 'amountUsd', 'tokensGranted', 'status', 'paypalTxId',
+          'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'orderId', 'userId', 'userLabel', 'packageId', 'packageTitle',
+          'planTier', 'amountUsd', 'tokensGranted', 'status', 'paypalTxId',
+          'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.orderId) &&
+        isValidId(data.userId) &&
+        data.userLabel is string && data.userLabel.size() >= 1 && data.userLabel.size() <= 120 &&
+        data.packageId is string && data.packageId.size() >= 1 && data.packageId.size() <= 64 &&
+        data.packageTitle is string && data.packageTitle.size() >= 1 && data.packageTitle.size() <= 140 &&
+        data.planTier is string && data.planTier in ['limited_trial', 'starter', 'pro', 'vip'] &&
+        data.amountUsd is number && data.amountUsd >= 1 && data.amountUsd <= 5000 &&
+        data.tokensGranted is number && data.tokensGranted >= 0 && data.tokensGranted <= 10000000 &&
+        data.status is string && data.status in ['pending', 'paid', 'cancelled'] &&
+        data.paypalTxId is string && data.paypalTxId.size() >= 0 && data.paypalTxId.size() <= 120 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMonetizationSettings(data) {
+      return data.keys().hasAll([
+          'trialPriceUsd', 'proPriceUsd', 'annualPriceUsd', 'freeProjectsLimit',
+          'requireLoginForExport', 'promoBannerEnabled', 'promoBannerText', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'trialPriceUsd', 'proPriceUsd', 'annualPriceUsd', 'freeProjectsLimit',
+          'requireLoginForExport', 'promoBannerEnabled', 'promoBannerText', 'updatedAt'
+        ]) &&
+        data.trialPriceUsd is number && data.trialPriceUsd >= 1 && data.trialPriceUsd <= 500 &&
+        data.proPriceUsd is number && data.proPriceUsd >= 1 && data.proPriceUsd <= 1000 &&
+        data.annualPriceUsd is number && data.annualPriceUsd >= 1 && data.annualPriceUsd <= 5000 &&
+        data.freeProjectsLimit is number && data.freeProjectsLimit >= 0 && data.freeProjectsLimit <= 100 &&
+        data.requireLoginForExport is bool &&
+        data.promoBannerEnabled is bool &&
+        data.promoBannerText is string && data.promoBannerText.size() >= 1 && data.promoBannerText.size() <= 180 &&
+        data.updatedAt is timestamp;
+    }
+
+    // Pillar 7 helper: verify paid order atomically before upgrading subscriber tier
+    function hasValidPaidOrderAfter(orderId, userId, planTier, prevTokens, nextTokens) {
+      return isValidId(orderId) &&
+        existsAfter(/databases/$(database)/documents/orders/$(orderId)) &&
+        getAfter(/databases/$(database)/documents/orders/$(orderId)).data.userId == userId &&
+        getAfter(/databases/$(database)/documents/orders/$(orderId)).data.status == 'paid' &&
+        getAfter(/databases/$(database)/documents/orders/$(orderId)).data.planTier == planTier &&
+        nextTokens <= prevTokens + getAfter(/databases/$(database)/documents/orders/$(orderId)).data.tokensGranted;
+    }
+
+    // =========================================================================
+    // COLLECTION: /admins/{userId}
+    // =========================================================================
+    match /admins/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin() || hasAdminUserRole();
+      allow create: if isVerifiedUser() && isValidId(userId) &&
+        isValidAdminRegistry(incoming()) &&
+        incoming().uid == userId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+      allow update: if isVerifiedUser() && isValidId(userId) &&
+        isValidAdminRegistry(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'updatedAt']);
+      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin() && userId != request.auth.uid;
+    }
+
+    // =========================================================================
+    // COLLECTION: /users/{userId} (PII-Isolated: Owner or Admin Only)
+    // =========================================================================
+    match /users/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin() || hasAdminUserRole() || (isVerifiedUser() && resource.data.uid == request.auth.uid);
+
+      allow create: if isVerifiedUser() && isValidId(userId) &&
+        isValidUserAccount(incoming()) &&
+        incoming().uid == userId &&
+        incoming().uid == request.auth.uid &&
+        incoming().email == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().lastActiveAt == request.time &&
+        (
+          (isAdmin() && incoming().role == 'admin') ||
+          (
+            incoming().role == 'subscriber' &&
+            incoming().planTier == 'free' &&
+            incoming().subscriptionStatus == 'inactive' &&
+            incoming().lastOrderId == '' &&
+            incoming().tokenBalance <= 15000 &&
+            incoming().projectsCreated == 0 &&
+            incoming().audiobooksCreated == 0 &&
+            incoming().pdfsCreated == 0 &&
+            incoming().sessionsCount <= 1
+          )
+        );
+
+      allow update: if isVerifiedUser() && isValidId(userId) &&
+        isValidUserAccount(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Tier 1: Admin managing subscriber plan, status, tokens, quota, or profile
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'role', 'planTier', 'subscriptionStatus',
+              'tokenBalance', 'projectsCreated', 'lastModuleUsed', 'lastOrderId', 'lastActiveAt', 'updatedAt'
+            ])
+          ) ||
+          // Tier 2A: User tracking own session activity & created project counts (strictly non-decreasing counters)
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().planTier == existing().planTier &&
+            incoming().subscriptionStatus == existing().subscriptionStatus &&
+            incoming().email == existing().email &&
+            incoming().lastOrderId == existing().lastOrderId &&
+            incoming().tokenBalance <= existing().tokenBalance &&
+            incoming().projectsCreated >= existing().projectsCreated &&
+            incoming().audiobooksCreated >= existing().audiobooksCreated &&
+            incoming().pdfsCreated >= existing().pdfsCreated &&
+            incoming().sessionsCount >= existing().sessionsCount &&
+            incoming().lastActiveAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'tokenBalance', 'projectsCreated', 'audiobooksCreated',
+              'pdfsCreated', 'sessionsCount', 'lastModuleUsed', 'lastActiveAt', 'updatedAt'
+            ])
+          ) ||
+          // Tier 2B: User upgrading plan atomically with a verified paid order (Pillar 7)
+          (
+            isOwner(userId) &&
+            incoming().role == existing().role &&
+            incoming().email == existing().email &&
+            incoming().subscriptionStatus == 'active' &&
+            incoming().planTier in ['limited_trial', 'starter', 'pro', 'vip'] &&
+            incoming().lastOrderId != existing().lastOrderId &&
+            incoming().lastActiveAt == request.time &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'planTier', 'subscriptionStatus', 'tokenBalance', 'lastOrderId', 'lastActiveAt', 'updatedAt'
+            ]) &&
+            hasValidPaidOrderAfter(
+              incoming().lastOrderId,
+              userId,
+              incoming().planTier,
+              existing().tokenBalance,
+              incoming().tokenBalance
+            )
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(userId) && isAdmin() && userId != request.auth.uid;
+    }
+
+    // =========================================================================
+    // COLLECTION: /usageEvents/{eventId}
+    // =========================================================================
+    match /usageEvents/{eventId} {
+      allow get: if isVerifiedUser() && isValidId(eventId) &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isBootstrappedAdmin() || hasAdminUserRole() || (isVerifiedUser() && resource.data.userId == request.auth.uid);
+
+      allow create: if isVerifiedUser() && isValidId(eventId) &&
+        isValidUsageEvent(incoming()) &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
+    }
+
+    // =========================================================================
+    // COLLECTION: /orders/{orderId}
+    // =========================================================================
+    match /orders/{orderId} {
+      allow get: if isVerifiedUser() && isValidId(orderId) &&
+        (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isBootstrappedAdmin() || hasAdminUserRole() || (isVerifiedUser() && resource.data.userId == request.auth.uid);
+
+      allow create: if isVerifiedUser() && isValidId(orderId) &&
+        isValidSubscriptionOrder(incoming()) &&
+        incoming().orderId == orderId &&
+        incoming().userId == request.auth.uid &&
+        incoming().status == 'pending' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() && isValidId(orderId) &&
+        isValidSubscriptionOrder(incoming()) &&
+        incoming().orderId == existing().orderId &&
+        incoming().userId == existing().userId &&
+        incoming().packageId == existing().packageId &&
+        incoming().amountUsd == existing().amountUsd &&
+        incoming().tokensGranted == existing().tokensGranted &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          // Admin override
+          (
+            isAdmin() &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paypalTxId', 'updatedAt'])
+          ) ||
+          // Owner transitioning pending -> paid or cancelled (Terminal State Locked once paid)
+          (
+            existing().userId == request.auth.uid &&
+            existing().status == 'pending' &&
+            incoming().status in ['paid', 'cancelled'] &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paypalTxId', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isVerifiedUser() && isValidId(orderId) && isAdmin();
+    }
+
+    // =========================================================================
+    // COLLECTION: /appSettings/{settingId}
+    // =========================================================================
+    match /appSettings/{settingId} {
+      allow get: if isValidId(settingId) && settingId == 'monetization';
+      allow list: if false;
+
+      allow create: if isVerifiedUser() && isValidId(settingId) &&
+        settingId == 'monetization' &&
+        isValidMonetizationSettings(incoming()) &&
+        incoming().updatedAt == request.time &&
+        isAdmin();
+
+      allow update: if isVerifiedUser() && isValidId(settingId) &&
+        settingId == 'monetization' &&
+        isValidMonetizationSettings(incoming()) &&
+        incoming().updatedAt == request.time &&
+        isAdmin() &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'trialPriceUsd', 'proPriceUsd', 'annualPriceUsd', 'freeProjectsLimit',
+          'requireLoginForExport', 'promoBannerEnabled', 'promoBannerText', 'updatedAt'
+        ]);
+
+      allow delete: if false;
+    }
+  }
+}

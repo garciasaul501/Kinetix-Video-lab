@@ -22,6 +22,7 @@ interface SocialShareModalProps {
   title: string;
   subtitle?: string;
   onOpenBuyTokens: () => void;
+  isPureAdminMode?: boolean;
   language?: SupportedLanguage;
 }
 
@@ -31,6 +32,7 @@ export const SocialShareModal: React.FC<SocialShareModalProps> = ({
   title,
   subtitle,
   onOpenBuyTokens,
+  isPureAdminMode = false,
   language = 'es',
 }) => {
   const toast = useToast();
@@ -298,35 +300,37 @@ export const SocialShareModal: React.FC<SocialShareModalProps> = ({
           </div>
         </div>
 
-        {/* Real PayPal Payment Testing Card directly embedded */}
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-yellow-400/20 to-amber-600/15 border-2 border-amber-400 flex flex-wrap items-center justify-between gap-4 shadow-sm">
-          <div className="space-y-0.5 max-w-md">
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-xs">
-                ⚡
-              </span>
-              <span className="text-sm font-black bg-gradient-to-r from-amber-800 to-yellow-700 bg-clip-text text-transparent">
-                {t('testPaymentBoxTitle', language)}
-              </span>
+        {/* Real PayPal Payment Testing Card directly embedded (Hidden in Pure Admin Mode) */}
+        {!isPureAdminMode && (
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-yellow-400/20 to-amber-600/15 border-2 border-amber-400 flex flex-wrap items-center justify-between gap-4 shadow-sm">
+            <div className="space-y-0.5 max-w-md">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded-full bg-amber-500 text-slate-950 font-black text-xs flex items-center justify-center shadow-xs">
+                  ⚡
+                </span>
+                <span className="text-sm font-black bg-gradient-to-r from-amber-800 to-yellow-700 bg-clip-text text-transparent">
+                  {t('testPaymentBoxTitle', language)}
+                </span>
+              </div>
+              <p className="text-xs text-slate-700 leading-snug">
+                {t('testPaymentBoxDesc', language)}
+              </p>
             </div>
-            <p className="text-xs text-slate-700 leading-snug">
-              {t('testPaymentBoxDesc', language)}
-            </p>
-          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              onOpenBuyTokens();
-            }}
-            className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-2 shadow-[0_4px_15px_rgba(245,158,11,0.4)] hover:scale-105 transition-all cursor-pointer"
-          >
-            <DollarSign className="w-4 h-4 text-slate-950" />
-            <span>{t('openCheckoutBtn', language)}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onOpenBuyTokens();
+              }}
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-xs flex items-center gap-2 shadow-[0_4px_15px_rgba(245,158,11,0.4)] hover:scale-105 transition-all cursor-pointer"
+            >
+              <DollarSign className="w-4 h-4 text-slate-950" />
+              <span>{t('openCheckoutBtn', language)}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

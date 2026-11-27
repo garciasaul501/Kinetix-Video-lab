@@ -10,6 +10,11 @@ import {
   Lock,
 } from 'lucide-react';
 import { SupportedLanguage } from '../utils/i18n';
+import {
+  MonetizationSettings,
+  DEFAULT_MONETIZATION_SETTINGS,
+  formatUsdPrice,
+} from '../services/firebaseStudioService';
 
 export interface TokenPackage {
   id: string;
@@ -88,7 +93,7 @@ export interface PayPalVerifiedAccessPayload {
 interface CreatedPayPalOrder {
   orderId: string;
   checkoutUrl: string;
-  receiverAccount: string;
+  merchantName?: string;
   amount: number;
   tokens: number;
   accessTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
@@ -109,6 +114,20 @@ interface BuyTokensModalProps {
     packageName: string,
     accessDetails?: PayPalVerifiedAccessPayload
   ) => void;
+  onOrderCreated?: (order: {
+    orderId: string;
+    packageId: string;
+    packageTitle: string;
+    planTier: 'limited_trial' | 'starter' | 'pro' | 'vip';
+    amountUsd: number;
+    tokensGranted: number;
+  }) => void;
+  monetizationSettings?: MonetizationSettings;
+  mandatoryPaywallContext?: {
+    projectsUsed: number;
+    freeProjectsLimit: number;
+    moduleName?: string;
+  } | null;
   language?: SupportedLanguage;
 }
 
@@ -118,8 +137,50 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
   currentBalance,
   currentAccessTier = 'free',
   onTokensPurchased,
+  onOrderCreated,
+  monetizationSettings = DEFAULT_MONETIZATION_SETTINGS,
+  mandatoryPaywallContext = null,
 }) => {
-  const [selectedPackage, setSelectedPackage] = useState<TokenPackage>(TOKEN_PACKAGES[0]);
+  const livePackages: TokenPackage[] = React.useMemo(() => {
+    const trialPrice = Math.max(1, Number(monetizationSettings.trialPriceUsd) || 5);
+    const proPrice = Math.max(1, Number(monetizationSettings.proPriceUsd) || 19.99);
+    const annualPrice = Math.max(1, Number(monetizationSettings.annualPriceUsd) || 149);
+    return TOKEN_PACKAGES.map((pkg) => {
+      if (pkg.id === 'trial-5') {
+        return {
+          ...pkg,
+          price: trialPrice,
+          label: `$${formatUsdPrice(trialPrice)} DLL`,
+        };
+      }
+      if (pkg.id === 'token-25') {
+        return {
+          ...pkg,
+          price: proPrice,
+          label: `$${formatUsdPrice(proPrice)} DLL`,
+        };
+      }
+      if (pkg.id === 'token-50') {
+        return {
+          ...pkg,
+          price: annualPrice,
+          label: `$${formatUsdPrice(annualPrice)} DLL`,
+          title: 'Plan Anual VIP',
+          accessLabel: '365 días · Comercial · 625,000 tokens',
+          accessDays: 365,
+        };
+      }
+      return pkg;
+    });
+  }, [
+    monetizationSettings.trialPriceUsd,
+    monetizationSettings.proPriceUsd,
+    monetizationSettings.annualPriceUsd,
+  ]);
+
+  const [selectedPackageId, setSelectedPackageId] = useState<string>(TOKEN_PACKAGES[0].id);
+  const selectedPackage =
+    livePackages.find((p) => p.id === selectedPackageId) || livePackages[0];
   const [isCreatingOrder, setIsCreatingOrder] = useState<boolean>(false);
   const [isVerifyingOrder, setIsVerifyingOrder] = useState<boolean>(false);
   const [createdOrder, setCreatedOrder] = useState<CreatedPayPalOrder | null>(null);
@@ -127,33 +188,23 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
   const [buyerEmail, setBuyerEmail] = useState<string>('');
   const [purchaseSuccess, setPurchaseSuccess] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [receiverAccount, setReceiverAccount] = useState<string>('garciasaul@hotmail.com');
 
   useEffect(() => {
     if (!isOpen) return;
     setErrorMessage(null);
     setPurchaseSuccess(null);
-    // Fetch live verified PayPal account status from server
-    fetch('/api/paypal/status')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data && data.receiverAccount) {
-          setReceiverAccount(data.receiverAccount);
-        }
-      })
-      .catch(() => {});
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const handleSelectPackage = (pkg: TokenPackage) => {
-    setSelectedPackage(pkg);
+    setSelectedPackageId(pkg.id);
     setCreatedOrder(null);
     setErrorMessage(null);
     setPurchaseSuccess(null);
   };
 
-  // Step 1: Create real server-side PayPal order directed to garciasaul@hotmail.com
+  // Step 1: Create real server-side PayPal order
   const handleCreatePayPalOrder = async () => {
     setIsCreatingOrder(true);
     setErrorMessage(null);
@@ -175,17 +226,30 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
         throw new Error(data.error || 'No se pudo generar la orden oficial de PayPal.');
       }
 
-      setCreatedOrder({
+      const createdPayload = {
         orderId: data.orderId,
         checkoutUrl: data.checkoutUrl,
-        receiverAccount: data.receiverAccount || receiverAccount,
+        merchantName: data.merchantName || 'Kinetix Studio Oficial',
         amount: data.amount,
         tokens: data.tokens,
-        accessTier: data.accessTier || selectedPackage.accessTier,
+        accessTier: (data.accessTier || selectedPackage.accessTier) as
+          | 'limited_trial'
+          | 'starter'
+          | 'pro'
+          | 'vip',
         accessLabel: data.accessLabel || selectedPackage.accessLabel,
         accessDays: data.accessDays || selectedPackage.accessDays,
         maxProjects: typeof data.maxProjects === 'number' ? data.maxProjects : selectedPackage.maxProjects,
         itemName: data.itemName || selectedPackage.title,
+      };
+      setCreatedOrder(createdPayload);
+      onOrderCreated?.({
+        orderId: createdPayload.orderId,
+        packageId: selectedPackage.id,
+        packageTitle: createdPayload.itemName,
+        planTier: createdPayload.accessTier,
+        amountUsd: createdPayload.amount,
+        tokensGranted: createdPayload.tokens,
       });
     } catch (err: any) {
       setErrorMessage(err?.message || 'Error al generar el enlace de pago en PayPal.');
@@ -266,21 +330,42 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
           </button>
           <div className="text-center px-10">
             <h2 className="font-extrabold text-lg sm:text-xl text-amber-900 tracking-tight">
-              Prueba por solo $5 DLL
+              Prueba por solo ${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL
             </h2>
             <p className="text-xs text-slate-500 font-medium">
-              Acredita tu Acceso Limitado inmediato con PayPal real
+              {monetizationSettings.freeProjectsLimit > 0
+                ? `Incluye ${monetizationSettings.freeProjectsLimit} ${monetizationSettings.freeProjectsLimit === 1 ? 'proyecto gratis' : 'proyectos gratis'} · Acredita acceso inmediato con PayPal`
+                : 'Acredita tu Acceso Limitado inmediato con PayPal real'}
             </p>
           </div>
         </div>
 
-        {/* Verified PayPal Merchant Account Banner */}
+        {/* Mandatory Subscription Gate Alert when Free Project Quota is Exhausted */}
+        {mandatoryPaywallContext && (
+          <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-300 space-y-1.5 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 font-extrabold text-rose-900">
+                <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>Suscripción Obligatoria para Continuar</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-mono font-bold text-[10px] shrink-0">
+                {mandatoryPaywallContext.projectsUsed} / {mandatoryPaywallContext.freeProjectsLimit} gratis
+              </span>
+            </div>
+            <p className="text-rose-900/90 leading-relaxed">
+              {mandatoryPaywallContext.freeProjectsLimit <= 0
+                ? `Se requiere una suscripción activa para generar proyectos${mandatoryPaywallContext.moduleName ? ` en ${mandatoryPaywallContext.moduleName}` : ''}.`
+                : `Has alcanzado el límite exacto de ${mandatoryPaywallContext.freeProjectsLimit} ${mandatoryPaywallContext.freeProjectsLimit === 1 ? 'proyecto gratuito permitido' : 'proyectos gratuitos permitidos'} por usuario. Activa un plan abajo para desbloquear creaciones de inmediato.`}
+            </p>
+          </div>
+        )}
+
+        {/* Verified PayPal Checkout Banner (Privacy-Safe) */}
         <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2 min-w-0">
             <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
             <span className="font-semibold text-slate-700 truncate">
-              PayPal Oficial Verificado:{' '}
-              <strong className="text-amber-950">{receiverAccount}</strong>
+              Pago Seguro Verificado · <strong className="text-amber-950">PayPal Oficial</strong>
             </span>
           </div>
           <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-bold text-[10px] shrink-0">
@@ -290,7 +375,7 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
 
         {/* Package Selector 2x2 */}
         <div className="grid grid-cols-2 gap-2.5">
-          {TOKEN_PACKAGES.map((pkg) => {
+          {livePackages.map((pkg) => {
             const isSelected = selectedPackage.id === pkg.id;
             return (
               <button
@@ -448,7 +533,7 @@ export const BuyTokensModal: React.FC<BuyTokensModalProps> = ({
             Estado:{' '}
             <strong className="text-amber-800 uppercase">
               {currentAccessTier === 'limited_trial'
-                ? 'Acceso Limitado ($5 DLL)'
+                ? `Acceso Limitado ($${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL)`
                 : currentAccessTier === 'free'
                   ? 'Sin activar'
                   : currentAccessTier}

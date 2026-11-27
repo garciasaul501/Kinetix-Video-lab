@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   FileText,
   Sparkles,
@@ -61,6 +61,8 @@ interface AiPdfCreatorStudioProps {
   onSendToNarration: (narrationText: string) => void;
   onSendToSequence: (title: string, narrationText: string, firstImage?: string) => void;
   onMonetizePdf: (title: string, summary: string) => void;
+  onBeforeGenerateProject?: () => boolean;
+  onProjectGenerated?: (title: string) => void;
 }
 
 const DOC_TYPES = [
@@ -98,6 +100,8 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
   onSendToNarration,
   onSendToSequence,
   onMonetizePdf,
+  onBeforeGenerateProject,
+  onProjectGenerated,
 }) => {
   const toast = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -136,6 +140,25 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
   } | null>(null);
   const [isPlayingVoice, setIsPlayingVoice] = useState<boolean>(false);
   const [isExportingMp3, setIsExportingMp3] = useState<boolean>(false);
+
+  const shortcutBridgeRef = useRef<{
+    triggerGenerate: () => void;
+    triggerSave: () => void;
+  }>({
+    triggerGenerate: () => {},
+    triggerSave: () => {},
+  });
+
+  useEffect(() => {
+    const onShortcutGenerate = () => shortcutBridgeRef.current.triggerGenerate();
+    const onShortcutSave = () => shortcutBridgeRef.current.triggerSave();
+    window.addEventListener('kinetix:shortcut-generate', onShortcutGenerate);
+    window.addEventListener('kinetix:shortcut-save', onShortcutSave);
+    return () => {
+      window.removeEventListener('kinetix:shortcut-generate', onShortcutGenerate);
+      window.removeEventListener('kinetix:shortcut-save', onShortcutSave);
+    };
+  }, []);
 
   const totalWords = useMemo(() => {
     if (!pdfDoc) return 0;
@@ -304,6 +327,10 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
       return;
     }
 
+    if (onBeforeGenerateProject && !onBeforeGenerateProject()) {
+      return;
+    }
+
     setIsGeneratingPdf(true);
     setVoiceAudio(null);
     setIsPlayingVoice(false);
@@ -357,6 +384,7 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
         sections: enrichedSections,
       });
       setActiveSectionIdx(0);
+      onProjectGenerated?.(generatedDoc.title);
 
       toast.dismiss(toastId);
       toast.success(
@@ -578,6 +606,38 @@ export const AiPdfCreatorStudio: React.FC<AiPdfCreatorStudioProps> = ({
         .join(' ');
       return { ...prev, sections: nextSections, fullNarration: nextNarration };
     });
+  };
+
+  // Sync latest callbacks for global Ctrl+Enter / Ctrl+S shortcuts
+  shortcutBridgeRef.current = {
+    triggerGenerate: () => {
+      if (isGeneratingPdf) {
+        toast.info('Generación en curso', 'Ya se está generando tu documento PDF con IA.');
+        return;
+      }
+      if (!topic.trim() && !attachedText.trim()) {
+        toast.info(
+          'Falta tema o documento',
+          'Escribe un tema o adjunta un archivo antes de pulsar Ctrl+Enter.'
+        );
+        return;
+      }
+      void handleGenerateAiPdf();
+    },
+    triggerSave: () => {
+      if (!pdfDoc) {
+        toast.info(
+          'Sin PDF generado aún',
+          'Pulsa Ctrl+Enter para crear el PDF completo con IA y luego Ctrl+S para guardarlo.'
+        );
+        return;
+      }
+      exportAiCreatedPdf(pdfDoc);
+      toast.success(
+        'PDF Guardado (Ctrl+S)',
+        `Se descargó "${pdfDoc.title}" en formato PDF profesional.`
+      );
+    },
   };
 
   const handleAddSection = () => {

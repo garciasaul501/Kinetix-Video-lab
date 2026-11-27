@@ -49,6 +49,7 @@ import {
   Users,
   Eye,
   EyeOff,
+  Keyboard,
 } from 'lucide-react';
 import { pcmBase64ToWav } from './utils/audioWav';
 import {
@@ -110,9 +111,29 @@ import {
 } from './components/PayPalMonetizationHub';
 import {
   AdminControlModal,
-  AdminSession,
-  DEFAULT_ADMIN_EMAIL,
 } from './components/AdminControlModal';
+import { AdminDashboardView } from './components/AdminDashboardView';
+import type { User as FirebaseAuthUser } from 'firebase/auth';
+import {
+  StudioUserAccount,
+  StudioUsageEvent,
+  StudioOrderRecord,
+  MonetizationSettings,
+  DEFAULT_MONETIZATION_SETTINGS,
+  subscribeFirebaseAuth,
+  syncSignedInUserProfile,
+  subscribeOwnUserProfile,
+  subscribeMonetizationSettings,
+  subscribeAllUsersForAdmin,
+  subscribeAllUsageEventsForAdmin,
+  subscribeAllOrdersForAdmin,
+  recordUserStudioActivity,
+  createFirestorePendingOrder,
+  confirmFirestorePaidOrderAtomically,
+  signOutFirebaseUser,
+  formatUsdPrice,
+  resolvePromoBannerText,
+} from './services/firebaseStudioService';
 import { VoiceDictationButton } from './components/VoiceDictationButton';
 import { NicheSceneGalleryView } from './components/NicheSceneGalleryView';
 import {
@@ -133,6 +154,7 @@ import { BuyTokensModal, PayPalVerifiedAccessPayload } from './components/BuyTok
 import { GuideChatBot, GuideActionType } from './components/GuideChatBot';
 import { UnifiedActionToolbar } from './components/UnifiedActionToolbar';
 import { SocialShareModal } from './components/SocialShareModal';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { LanguageSelector } from './components/LanguageSelector';
 import { useToast } from './components/ToastNotification';
 import { AiPdfCreatorStudio } from './components/AiPdfCreatorStudio';
@@ -1286,6 +1308,10 @@ ${textoPdf || '{{texto_pdf}}'}
       return;
     }
 
+    if (!enforceFreeProjectQuota('Director PDF')) {
+      return;
+    }
+
     setIsGeneratingProposal(true);
     setProposalError(null);
 
@@ -1320,6 +1346,12 @@ ${textoPdf || '{{texto_pdf}}'}
         };
         setProposal(enrichedProposal);
         applyDynamicStudioSeo('pdf-director', defaultSeoTitle);
+        recordGeneratedProjectUsage(
+          'pdf-director',
+          'pdf_created',
+          `Generó propuesta audiovisual: ${data.proposal.projectTitle || 'Propuesta PDF'}`,
+          { pdfsDelta: 1 }
+        );
       }
     } catch (err: any) {
       setProposalError(err?.message || 'Error al generar la propuesta audiovisual.');
@@ -1396,6 +1428,11 @@ ${textoPdf || '{{texto_pdf}}'}
       return;
     }
 
+    // Mandatory subscription gate once a free user reaches the exact Admin-defined freeProjectsLimit (supports 0..100)
+    if (!enforceFreeProjectQuota('Audiolibros IA')) {
+      return;
+    }
+
     setIsGeneratingVideoBook(true);
     setVideoBookError(null);
     setExportedBookMp4Url(null);
@@ -1464,6 +1501,12 @@ ${textoPdf || '{{texto_pdf}}'}
       toast.success(
         '¡Audiolibro y Voz Listos al 100%!',
         `Se crearon ${createdBook.pages.length} capítulos con narración de voz real. Pulsa "Reproducir" para verlo y escucharlo.`
+      );
+      recordGeneratedProjectUsage(
+        'videobook',
+        'audiobook_created',
+        `Creó audiolibro: ${createdBook.bookTitle || 'Sin título'} (${createdBook.pages.length} caps)`,
+        { audiobooksDelta: 1 }
       );
     } catch (err: any) {
       toast.dismiss(toastId);
@@ -1586,6 +1629,14 @@ ${textoPdf || '{{texto_pdf}}'}
     subtitleSettings?: DynamicSubtitleSettings
   ) => {
     if (isExportingBookMp4) return;
+    if (!isFirebaseAdmin && monetizationSettings.requireLoginForExport && !firebaseUser) {
+      toast.info(
+        'Inicia sesión gratis para descargar tu MP4',
+        'Conecta tu cuenta de Google en 1 clic para guardar y exportar tus videos.'
+      );
+      setIsAdminModalOpen(true);
+      return;
+    }
     setIsExportingBookMp4(true);
     setBookMp4Progress(5);
 
@@ -1625,6 +1676,15 @@ ${textoPdf || '{{texto_pdf}}'}
         '¡Video MP4 Exportado con Éxito!',
         `El archivo de "${videoBook.bookTitle || 'Audiolibro'}" se ha generado y descargado.`
       );
+      if (firebaseUser && firebaseProfile) {
+        void recordUserStudioActivity(
+          firebaseUser,
+          firebaseProfile,
+          'video_exported',
+          'videobook',
+          `Exportó Video MP4: ${videoBook.bookTitle || 'Audiolibro'}`
+        ).catch(() => {});
+      }
 
       // Also save MP4 automatically into the Audiobook Folder Vault
       try {
@@ -1679,6 +1739,14 @@ ${textoPdf || '{{texto_pdf}}'}
   };
 
   const handleExportVideoBookMp3 = async () => {
+    if (!isFirebaseAdmin && monetizationSettings.requireLoginForExport && !firebaseUser) {
+      toast.info(
+        'Inicia sesión gratis para descargar tu MP3',
+        'Conecta tu cuenta de Google en 1 clic para guardar y exportar tus audios.'
+      );
+      setIsAdminModalOpen(true);
+      return;
+    }
     const toastId = toast.loading(
       'Exportando Audio MP3...',
       'Empaquetando la narración completa en archivo MP3 de alta fidelidad...'
@@ -1702,6 +1770,15 @@ ${textoPdf || '{{texto_pdf}}'}
         '¡Audiolibro MP3 Listo!',
         'El archivo de audio (.MP3) se ha generado y descargado correctamente.'
       );
+      if (firebaseUser && firebaseProfile) {
+        void recordUserStudioActivity(
+          firebaseUser,
+          firebaseProfile,
+          'voice_generated',
+          'videobook',
+          `Exportó Audio MP3: ${videoBook.bookTitle || 'Audiolibro'}`
+        ).catch(() => {});
+      }
 
       // Also save MP3 automatically into the Audiobook Folder Vault
       try {
@@ -2030,6 +2107,9 @@ ${textoPdf || '{{texto_pdf}}'}
   // --- HANDLERS ---
   const handleGenerateScript = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!enforceFreeProjectQuota('Guion 2 Minutos')) {
+      return;
+    }
     setIsGeneratingScript(true);
     setScriptError(null);
 
@@ -2051,6 +2131,11 @@ ${textoPdf || '{{texto_pdf}}'}
       if (data.script) {
         setGeneratedScript(data.script);
         handleSaveNewScriptVersion('Generado con IA', data.script, 'Generado IA');
+        recordGeneratedProjectUsage(
+          'script',
+          'audiobook_created',
+          `Generó guion de 2 minutos: ${data.script.title || scriptTopic.slice(0, 60)}`
+        );
       }
     } catch (err: any) {
       setScriptError(err?.message || 'Error de conexión al generar el guion.');
@@ -2194,6 +2279,9 @@ ${textoPdf || '{{texto_pdf}}'}
 
   const handleGenerateSequencePlan = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!enforceFreeProjectQuota('Clips y Storyboard')) {
+      return;
+    }
     setIsGeneratingSequence(true);
     setSequenceError(null);
 
@@ -2214,6 +2302,11 @@ ${textoPdf || '{{texto_pdf}}'}
       if (data.sequence) {
         setSequencePlan(data.sequence);
         setActiveShotIndex(0);
+        recordGeneratedProjectUsage(
+          'sequence',
+          'video_exported',
+          `Generó secuencia storyboard: ${data.sequence.title || 'Secuencia IA'}`
+        );
       }
     } catch (err: any) {
       setSequenceError(err?.message || 'Error al generar la secuencia visual.');
@@ -2553,12 +2646,13 @@ ${textoPdf || '{{texto_pdf}}'}
     setActiveModule('paypal-monetization');
   };
 
-  // Administrator Account Session (garciasaul501@gmail.com / Garciasaul@501)
+  // Administrator Account Session
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isViralLogoModalOpen, setIsViralLogoModalOpen] = useState(false);
   const [isSupportConciergeOpen, setIsSupportConciergeOpen] = useState(false);
   const [isBuyTokensModalOpen, setIsBuyTokensModalOpen] = useState(false);
   const [isSocialShareModalOpen, setIsSocialShareModalOpen] = useState(false);
+  const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
   const [userTokenBalance, setUserTokenBalance] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('kinetix_user_tokens');
@@ -2668,6 +2762,22 @@ ${textoPdf || '{{texto_pdf}}'}
       // ignore storage errors
     }
 
+    // Persist paid upgrade atomically in Firestore when signed in
+    if (firebaseUser && firebaseProfile && accessDetails?.orderId) {
+      void confirmFirestorePaidOrderAtomically(firebaseUser, firebaseProfile, {
+        orderId: accessDetails.orderId,
+        packageId: grantedTier === 'limited_trial' ? 'trial-5' : 'plan-pro',
+        packageTitle: packageName || grantedLabel,
+        planTier:
+          grantedTier === 'starter' || grantedTier === 'pro' || grantedTier === 'vip'
+            ? grantedTier
+            : 'limited_trial',
+        amountUsd: amountPaid,
+        tokensGranted: tokensToAdd || 62500,
+        paypalTxId: accessDetails.paypalTxId,
+      }).catch(() => {});
+    }
+
     toast.success(
       grantedTier === 'limited_trial'
         ? '¡Acceso Limitado ($5 DLL) Acreditado!'
@@ -2724,7 +2834,11 @@ ${textoPdf || '{{texto_pdf}}'}
 
   const handleGuideBotAction = (action: GuideActionType) => {
     if (action === 'open-trial') {
-      setIsBuyTokensModalOpen(true);
+      if (isPureAdminMode) {
+        setActiveModule('admin-dashboard');
+      } else {
+        setIsBuyTokensModalOpen(true);
+      }
     } else if (action === 'upload-file') {
       handleToolbarCargar();
     } else if (action === 'open-player') {
@@ -2737,7 +2851,11 @@ ${textoPdf || '{{texto_pdf}}'}
       action === 'niche-gallery' ||
       action === 'paypal-monetization'
     ) {
-      setActiveModule(action);
+      if (action === 'paypal-monetization' && isPureAdminMode) {
+        setActiveModule('admin-dashboard');
+      } else {
+        setActiveModule(action);
+      }
     }
   };
 
@@ -2750,47 +2868,548 @@ ${textoPdf || '{{texto_pdf}}'}
     }
   });
 
-  const [adminSession, setAdminSession] = useState<AdminSession | null>(() => {
-    try {
-      const saved = localStorage.getItem('kinetix_admin_session_v1');
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {
-      // Ignore storage error
-    }
-    return {
-      token: 'admin-master-verified-token',
-      loggedInAt: new Date().toISOString(),
-      user: {
-        id: 'admin-master-01',
-        email: DEFAULT_ADMIN_EMAIL,
-        name: 'Saúl García (Administrador Principal)',
-        role: 'admin',
-        plan: 'Enterprise Master · Ilimitado',
-        status: 'active',
-        createdAt: '2026-10-20',
-      },
-    };
-  });
+  // Firebase Authentication + Real-Time Role & Subscriber Analytics State
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseAuthUser | null>(null);
+  const [firebaseProfile, setFirebaseProfile] = useState<StudioUserAccount | null>(null);
+  const [isFirebaseAdmin, setIsFirebaseAdmin] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [isPreviewingCustomerView, setIsPreviewingCustomerView] = useState<boolean>(false);
+  const [adminUsersList, setAdminUsersList] = useState<StudioUserAccount[]>([]);
+  const [adminUsageEvents, setAdminUsageEvents] = useState<StudioUsageEvent[]>([]);
+  const [adminOrdersList, setAdminOrdersList] = useState<StudioOrderRecord[]>([]);
+  const [isLoadingAdminData, setIsLoadingAdminData] = useState<boolean>(false);
+  const [monetizationSettings, setMonetizationSettings] = useState<MonetizationSettings>(
+    DEFAULT_MONETIZATION_SETTINGS
+  );
 
-  const handleAdminLoginSuccess = (newSession: AdminSession) => {
-    setAdminSession(newSession);
+  // Strictly verify admin authority from Firestore users/{uid}.role === 'admin'
+  const isVerifiedFirestoreAdmin = Boolean(
+    firebaseUser && isFirebaseAdmin && firebaseProfile?.role === 'admin'
+  );
+
+  // Pure Admin Mode: logged-in Firestore Admin sees ZERO subscriber options unless Vista de Cliente is manually activated
+  const isPureAdminMode = isVerifiedFirestoreAdmin && !isPreviewingCustomerView;
+
+  // Mandatory Free Projects Quota tracking (Firestore authoritative when signed in; localStorage fallback for guests)
+  const [localFreeProjectsUsed, setLocalFreeProjectsUsed] = useState<number>(() => {
     try {
-      localStorage.setItem('kinetix_admin_session_v1', JSON.stringify(newSession));
+      const raw = localStorage.getItem('kinetix_free_projects_used_v1');
+      return raw ? Math.max(0, Math.round(Number(raw) || 0)) : 0;
     } catch {
-      // Ignore storage error
+      return 0;
+    }
+  });
+  const [mandatoryPaywallContext, setMandatoryPaywallContext] = useState<{
+    projectsUsed: number;
+    freeProjectsLimit: number;
+    moduleName?: string;
+  } | null>(null);
+
+  const exactFreeProjectsLimit = Math.max(
+    0,
+    Math.min(100, Math.round(Number(monetizationSettings.freeProjectsLimit) || 0))
+  );
+  const hasActivePaidSubscription = Boolean(
+    isVerifiedFirestoreAdmin ||
+      userAccessTier !== 'free' ||
+      (firebaseProfile &&
+        firebaseProfile.planTier !== 'free' &&
+        firebaseProfile.subscriptionStatus === 'active')
+  );
+  const effectiveFreeProjectsUsed = firebaseProfile
+    ? Math.max(0, firebaseProfile.projectsCreated || 0)
+    : localFreeProjectsUsed;
+  const hasReachedMandatoryFreeLimit =
+    !hasActivePaidSubscription && effectiveFreeProjectsUsed >= exactFreeProjectsLimit;
+
+  const enforceFreeProjectQuota = (moduleLabel: string): boolean => {
+    if (hasActivePaidSubscription) {
+      return true;
+    }
+    if (effectiveFreeProjectsUsed >= exactFreeProjectsLimit) {
+      setMandatoryPaywallContext({
+        projectsUsed: effectiveFreeProjectsUsed,
+        freeProjectsLimit: exactFreeProjectsLimit,
+        moduleName: moduleLabel,
+      });
+      setIsBuyTokensModalOpen(true);
+      toast.info(
+        'Suscripción obligatoria',
+        exactFreeProjectsLimit <= 0
+          ? `Se requiere una suscripción activa para generar contenido en ${moduleLabel}. Activa tu plan desde $${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL.`
+          : `Alcanzaste el límite exacto de ${exactFreeProjectsLimit} ${exactFreeProjectsLimit === 1 ? 'proyecto gratuito' : 'proyectos gratuitos'} por usuario (${effectiveFreeProjectsUsed}/${exactFreeProjectsLimit}). Activa tu suscripción para seguir creando.`
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const recordGeneratedProjectUsage = (
+    moduleId: string,
+    eventType: 'audiobook_created' | 'pdf_created' | 'voice_generated' | 'video_exported',
+    summary: string,
+    extraDeltas?: { audiobooksDelta?: number; pdfsDelta?: number }
+  ) => {
+    if (!firebaseUser) {
+      setLocalFreeProjectsUsed((prev) => {
+        const next = prev + 1;
+        try {
+          localStorage.setItem('kinetix_free_projects_used_v1', String(next));
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+    }
+    if (firebaseUser && firebaseProfile) {
+      void recordUserStudioActivity(
+        firebaseUser,
+        firebaseProfile,
+        eventType,
+        moduleId,
+        summary,
+        {
+          projectsDelta: 1,
+          audiobooksDelta: extraDeltas?.audiobooksDelta,
+          pdfsDelta: extraDeltas?.pdfsDelta,
+        }
+      ).catch(() => {});
     }
   };
 
-  const handleAdminLogout = () => {
-    setAdminSession(null);
+  // Clean legacy localStorage admin keys once on mount
+  useEffect(() => {
     try {
       localStorage.removeItem('kinetix_admin_session_v1');
+      localStorage.removeItem('kinetix_admin_session_v2');
     } catch {
-      // Ignore storage error
+      // ignore storage errors
     }
+  }, []);
+
+  // Subscribe to global monetization settings
+  useEffect(() => {
+    const unsub = subscribeMonetizationSettings((settings) => {
+      setMonetizationSettings(settings);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to Firebase Auth & sync user profile/role to Firestore
+  useEffect(() => {
+    let unsubOwnProfile: (() => void) | null = null;
+    const unsubAuth = subscribeFirebaseAuth(async (user) => {
+      if (unsubOwnProfile) {
+        unsubOwnProfile();
+        unsubOwnProfile = null;
+      }
+      setFirebaseUser(user);
+      if (!user) {
+        setFirebaseProfile(null);
+        setIsFirebaseAdmin(false);
+        setIsPreviewingCustomerView(false);
+        setIsAuthLoading(false);
+        return;
+      }
+      setIsAuthLoading(true);
+      try {
+        const { profile, isAdmin } = await syncSignedInUserProfile(user, activeModule);
+        const strictAdmin = isAdmin && profile.role === 'admin';
+        setFirebaseProfile(profile);
+        setIsFirebaseAdmin(strictAdmin);
+        if (strictAdmin) {
+          setIsBuyTokensModalOpen(false);
+          setUserTokenBalance(9999999);
+          setUserAccessTier('vip');
+          setUserAccessLabel('Modo Administrador · Ilimitado');
+        } else {
+          setIsPreviewingCustomerView(false);
+          setUserTokenBalance(profile.tokenBalance);
+          setUserAccessTier(profile.planTier);
+          if (profile.planTier !== 'free' && profile.subscriptionStatus === 'active') {
+            setUserAccessLabel(`Plan ${profile.planTier.toUpperCase()} Activo`);
+          }
+        }
+        unsubOwnProfile = subscribeOwnUserProfile(user.uid, (liveProfile) => {
+          if (!liveProfile) {
+            setIsFirebaseAdmin(false);
+            setIsPreviewingCustomerView(false);
+            return;
+          }
+          setFirebaseProfile(liveProfile);
+          const liveIsAdmin = liveProfile.role === 'admin';
+          setIsFirebaseAdmin(liveIsAdmin);
+          if (liveIsAdmin) {
+            setUserTokenBalance(9999999);
+            setUserAccessTier('vip');
+            setUserAccessLabel('Modo Administrador · Ilimitado');
+          } else {
+            setIsPreviewingCustomerView(false);
+            setUserTokenBalance(liveProfile.tokenBalance);
+            setUserAccessTier(liveProfile.planTier);
+          }
+        });
+      } catch (err) {
+        console.error('Error syncing Firebase user profile:', err);
+      } finally {
+        setIsAuthLoading(false);
+      }
+    });
+
+    return () => {
+      unsubAuth();
+      if (unsubOwnProfile) unsubOwnProfile();
+    };
+  }, []);
+
+  // Attach Admin-only live Firestore listeners ONLY when Firestore confirms role === 'admin'
+  useEffect(() => {
+    if (!isVerifiedFirestoreAdmin) {
+      setAdminUsersList([]);
+      setAdminUsageEvents([]);
+      setAdminOrdersList([]);
+      setIsLoadingAdminData(false);
+      if (activeModule === 'admin-dashboard') {
+        setActiveModule('videobook');
+      }
+      return;
+    }
+    setIsLoadingAdminData(true);
+    const handleUnauthorizedAdmin = () => {
+      setIsFirebaseAdmin(false);
+      setIsPreviewingCustomerView(false);
+      setAdminUsersList([]);
+      setAdminUsageEvents([]);
+      setAdminOrdersList([]);
+      setIsLoadingAdminData(false);
+    };
+    const unsubUsers = subscribeAllUsersForAdmin((list) => {
+      setAdminUsersList(list);
+      setIsLoadingAdminData(false);
+    }, handleUnauthorizedAdmin);
+    const unsubEvents = subscribeAllUsageEventsForAdmin((events) => {
+      setAdminUsageEvents(events);
+    }, handleUnauthorizedAdmin);
+    const unsubOrders = subscribeAllOrdersForAdmin((orders) => {
+      setAdminOrdersList(orders);
+    }, handleUnauthorizedAdmin);
+
+    return () => {
+      unsubUsers();
+      unsubEvents();
+      unsubOrders();
+    };
+  }, [isVerifiedFirestoreAdmin]);
+
+  // Track active module changes for logged-in users so Admin sees real-time activity
+  useEffect(() => {
+    if (!firebaseUser || !firebaseProfile || isFirebaseAdmin) return;
+    if (activeModule === 'admin-dashboard') {
+      setActiveModule('videobook');
+      return;
+    }
+    void recordUserStudioActivity(
+      firebaseUser,
+      firebaseProfile,
+      'session_start',
+      activeModule,
+      `Abrió módulo: ${STUDIO_MODULE_SEO_MAP[activeModule]?.shortLabel || activeModule}`
+    ).catch(() => {});
+  }, [activeModule]);
+
+  const handleFirebaseSignOut = async () => {
+    await signOutFirebaseUser();
+    if (activeModule === 'admin-dashboard') {
+      setActiveModule('videobook');
+    }
+    toast.info('Sesión cerrada', 'Puedes iniciar sesión con otra cuenta cuando gustes.');
   };
+
+  // Context-aware global shortcut actions (Ctrl+S & Ctrl+Enter)
+  const handleGlobalShortcutSave = () => {
+    if (activeModule === 'script') {
+      handleSaveNewScriptVersion('Guardado rápido con atajo Ctrl+S');
+      toast.success(
+        'Guion Guardado (Ctrl+S)',
+        'Se guardó una nueva versión de tu guion en el historial.'
+      );
+      return;
+    }
+    if (activeModule === 'videobook') {
+      if (hasCreatedVideoBook) {
+        void handleSaveCurrentAudiobookToFolder('MP3');
+      } else {
+        toast.info(
+          'Sin audiolibro listo',
+          'Primero genera un audiolibro con Ctrl+Enter para guardarlo en Mi Biblioteca.'
+        );
+      }
+      return;
+    }
+    if (activeModule === 'ai-pdf-creator') {
+      window.dispatchEvent(new CustomEvent('kinetix:shortcut-save'));
+      return;
+    }
+    if (activeModule === 'pdf-director') {
+      handleExportProposalPdf();
+      toast.success(
+        'Propuesta PDF Guardada (Ctrl+S)',
+        'Se exportó la propuesta audiovisual actual en PDF.'
+      );
+      return;
+    }
+    handleSaveNewScriptVersion('Guardado rápido con atajo Ctrl+S');
+    toast.success(
+      'Guion Guardado (Ctrl+S)',
+      'Se guardó una copia de seguridad de tu guion activo.'
+    );
+  };
+
+  const handleGlobalShortcutGenerate = () => {
+    if (activeModule === 'videobook') {
+      if (isGeneratingVideoBook) {
+        toast.info('Generación en curso', 'Tu audiolibro IA se está procesando.');
+        return;
+      }
+      if (!textoPdf.trim()) {
+        toast.info(
+          'Carga o escribe tu texto',
+          'Pega texto o pulsa Ctrl+U para cargar un PDF antes de generar con Ctrl+Enter.'
+        );
+        return;
+      }
+      void handleCreateVideoBookFromPdf(false);
+      return;
+    }
+    if (activeModule === 'ai-pdf-creator') {
+      window.dispatchEvent(new CustomEvent('kinetix:shortcut-generate'));
+      return;
+    }
+    if (activeModule === 'script') {
+      if (isGeneratingScript) {
+        toast.info('Generación en curso', 'Se está redactando tu guion de 2 minutos.');
+        return;
+      }
+      void handleGenerateScript();
+      return;
+    }
+    if (activeModule === 'narration') {
+      if (isGeneratingNarration) {
+        toast.info('Síntesis en curso', 'Se está generando tu locución neuronal.');
+        return;
+      }
+      void handleGenerateNarration();
+      return;
+    }
+    if (activeModule === 'pdf-director') {
+      if (isGeneratingProposal) {
+        toast.info('Análisis en curso', 'Se está generando tu propuesta audiovisual.');
+        return;
+      }
+      void handleGeneratePdfProposal();
+      return;
+    }
+    if (activeModule === 'sequence') {
+      if (isGeneratingSequence) {
+        toast.info('Storyboard en curso', 'Se está creando la secuencia de planos.');
+        return;
+      }
+      void handleGenerateSequencePlan();
+      return;
+    }
+    toast.info(
+      'Atajo Ctrl+Enter',
+      'Cambia a un módulo de creación (Alt+1 a Alt+7) para generar contenido IA al instante.'
+    );
+  };
+
+  const globalShortcutRef = useRef<{
+    onSave: () => void;
+    onGenerate: () => void;
+    onUpload: () => void;
+    onOpenPlayer: () => void;
+    onExportMp3: () => void;
+    onOpenShare: () => void;
+    onToggleShortcuts: () => void;
+    onNavigate: (mod: ActiveModule, label: string) => void;
+    onEscape: () => boolean;
+    isAdmin: boolean;
+  }>({
+    onSave: () => {},
+    onGenerate: () => {},
+    onUpload: () => {},
+    onOpenPlayer: () => {},
+    onExportMp3: () => {},
+    onOpenShare: () => {},
+    onToggleShortcuts: () => {},
+    onNavigate: () => {},
+    onEscape: () => false,
+    isAdmin: false,
+  });
+
+  globalShortcutRef.current = {
+    onSave: handleGlobalShortcutSave,
+    onGenerate: handleGlobalShortcutGenerate,
+    onUpload: handleToolbarCargar,
+    onOpenPlayer: () => {
+      if (hasCreatedVideoBook && !isGeneratingVideoBook) {
+        openPlayerModal();
+      } else {
+        toast.info(
+          'Reproductor no disponible',
+          'Primero crea o carga un audiolibro para abrir el reproductor (Ctrl+P).'
+        );
+      }
+    },
+    onExportMp3: () => {
+      if (hasCreatedVideoBook) {
+        void handleExportVideoBookMp3();
+      } else {
+        toast.info(
+          'Sin audio para exportar',
+          'Crea un audiolibro primero para exportar el audio en MP3.'
+        );
+      }
+    },
+    onOpenShare: () => setIsSocialShareModalOpen(true),
+    onToggleShortcuts: () => setIsShortcutsModalOpen((prev) => !prev),
+    onNavigate: (mod, label) => {
+      setActiveModule(mod);
+      toast.info('Módulo activo', `Cambiaste a ${label}.`);
+    },
+    onEscape: () => {
+      if (isShortcutsModalOpen) {
+        setIsShortcutsModalOpen(false);
+        return true;
+      }
+      if (isSocialShareModalOpen) {
+        setIsSocialShareModalOpen(false);
+        return true;
+      }
+      if (isBuyTokensModalOpen) {
+        setIsBuyTokensModalOpen(false);
+        return true;
+      }
+      if (isSupportConciergeOpen) {
+        setIsSupportConciergeOpen(false);
+        return true;
+      }
+      if (isViralLogoModalOpen) {
+        setIsViralLogoModalOpen(false);
+        return true;
+      }
+      if (isAdminModalOpen) {
+        setIsAdminModalOpen(false);
+        return true;
+      }
+      if (isPlayerModalOpen) {
+        setIsPlayerModalOpen(false);
+        return true;
+      }
+      return false;
+    },
+    isAdmin: isVerifiedFirestoreAdmin,
+  };
+
+  useEffect(() => {
+    const isEditableElement = (target: EventTarget | null): boolean => {
+      if (!(target instanceof HTMLElement)) return false;
+      const tag = target.tagName;
+      return (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        target.isContentEditable
+      );
+    };
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const modKey = e.ctrlKey || e.metaKey;
+      const lowerKey = e.key.toLowerCase();
+
+      // Escape: close topmost modal
+      if (e.key === 'Escape') {
+        if (globalShortcutRef.current.onEscape()) {
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // Ctrl/Cmd + / OR '?' (outside text inputs) -> Toggle keyboard shortcuts guide
+      if (
+        (modKey && !e.altKey && (e.key === '/' || e.code === 'Slash')) ||
+        (!modKey && !e.altKey && e.key === '?' && !isEditableElement(e.target))
+      ) {
+        e.preventDefault();
+        globalShortcutRef.current.onToggleShortcuts();
+        return;
+      }
+
+      // Ctrl/Cmd + S -> Context-aware save (works inside editors too)
+      if (modKey && !e.altKey && !e.shiftKey && lowerKey === 's') {
+        e.preventDefault();
+        globalShortcutRef.current.onSave();
+        return;
+      }
+
+      // Ctrl/Cmd + Enter -> Context-aware AI generation (works inside editors too)
+      if (modKey && !e.altKey && e.key === 'Enter') {
+        e.preventDefault();
+        globalShortcutRef.current.onGenerate();
+        return;
+      }
+
+      // Ctrl/Cmd + U -> Load PDF / TXT / MD file
+      if (modKey && !e.altKey && !e.shiftKey && lowerKey === 'u') {
+        e.preventDefault();
+        globalShortcutRef.current.onUpload();
+        return;
+      }
+
+      // Ctrl/Cmd + P -> Open Audiobook Player
+      if (modKey && !e.altKey && !e.shiftKey && lowerKey === 'p') {
+        e.preventDefault();
+        globalShortcutRef.current.onOpenPlayer();
+        return;
+      }
+
+      // Ctrl/Cmd + Shift + E -> Export Audiobook MP3
+      if (modKey && e.shiftKey && !e.altKey && lowerKey === 'e') {
+        e.preventDefault();
+        globalShortcutRef.current.onExportMp3();
+        return;
+      }
+
+      // Ctrl/Cmd + Shift + K -> Open Share modal
+      if (modKey && e.shiftKey && !e.altKey && lowerKey === 'k') {
+        e.preventDefault();
+        globalShortcutRef.current.onOpenShare();
+        return;
+      }
+
+      // Alt + 1..8 -> Fast module switching
+      if (e.altKey && !modKey && !e.shiftKey) {
+        const navMap: Record<string, { id: ActiveModule; label: string; adminOnly?: boolean }> = {
+          Digit1: { id: 'videobook', label: 'Audiolibros IA' },
+          Digit2: { id: 'ai-pdf-creator', label: 'Crear PDF Completo con IA' },
+          Digit3: { id: 'niche-gallery', label: 'Galería de Escenas' },
+          Digit4: { id: 'script', label: 'Guion 2 Minutos' },
+          Digit5: { id: 'pdf-director', label: 'Director PDF' },
+          Digit6: { id: 'narration', label: 'Locución Neuronal' },
+          Digit7: { id: 'sequence', label: 'Clips y Storyboard' },
+          Digit8: { id: 'admin-dashboard', label: 'Panel de Administración', adminOnly: true },
+        };
+        const target = navMap[e.code];
+        if (target && (!target.adminOnly || globalShortcutRef.current.isAdmin)) {
+          e.preventDefault();
+          globalShortcutRef.current.onNavigate(target.id, target.label);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
 
   return (
     <div className="min-h-screen flex bg-white text-slate-900 transition-colors duration-300 selection:bg-amber-500 selection:text-black">
@@ -2829,24 +3448,48 @@ ${textoPdf || '{{texto_pdf}}'}
             </button>
           </div>
 
-          {/* Primary Access CTA */}
+          {/* Primary Top CTA: Pure Admin sees Admin Dashboard CTA (NO subscriber buttons); Customers see Subscribe CTA */}
           <div className="px-4 pt-4 pb-2">
-            <button
-              type="button"
-              onClick={() => {
-                setActiveModule('paypal-monetization');
-                setMobileSidebarOpen(false);
-              }}
-              className={`w-full px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer ${
-                activeModule === 'paypal-monetization'
-                  ? 'bg-amber-600 text-white'
-                  : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-              }`}
-              title="Empieza ahora antes de usar o ver - Botón Acceso"
-            >
-              <Zap className="w-4 h-4 fill-current shrink-0" />
-              <span className="truncate">{t('subscribeNow', currentLanguage)}</span>
-            </button>
+            {isPureAdminMode ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveModule('admin-dashboard');
+                  setMobileSidebarOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-between gap-2 transition-colors cursor-pointer border ${
+                  activeModule === 'admin-dashboard'
+                    ? 'bg-slate-950 text-amber-300 border-amber-500'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
+                }`}
+                title="Ver suscriptores, quién usa la app, inactivos e ingresos"
+              >
+                <span className="flex items-center gap-2 truncate">
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Panel Admin y Suscriptores</span>
+                </span>
+                <span className="px-1.5 py-0.5 rounded bg-black/20 font-mono text-[10px]">
+                  {adminUsersList.filter((u) => u.role !== 'admin').length}
+                </span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveModule('paypal-monetization');
+                  setMobileSidebarOpen(false);
+                }}
+                className={`w-full px-3.5 py-2.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+                  activeModule === 'paypal-monetization'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                }`}
+                title="Empieza ahora antes de usar o ver - Botón Acceso"
+              >
+                <Zap className="w-4 h-4 fill-current shrink-0" />
+                <span className="truncate">{t('subscribeNow', currentLanguage)}</span>
+              </button>
+            )}
           </div>
 
           {/* Primary Studio Modules Navigation */}
@@ -2933,38 +3576,83 @@ ${textoPdf || '{{texto_pdf}}'}
           </div>
         </div>
 
-        {/* Sidebar Footer: Tokens + Account Utilities */}
+        {/* Sidebar Footer: Admin Status Card (Pure Admin) OR Token Balance + $5 DLL (Subscribers) */}
         <div className="p-3 border-t border-slate-200/80 space-y-2 bg-slate-50/40 shrink-0">
-          {/* Token Balance Row */}
-          <div className="px-3 py-2.5 rounded-xl bg-white border border-amber-200/80 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[11px] font-medium text-slate-500">
-                {userAccessTier === 'limited_trial'
-                  ? 'Acceso Limitado ($5 DLL)'
-                  : userAccessTier !== 'free'
-                    ? `Plan ${userAccessTier.toUpperCase()}`
-                    : t('tokensBadge', currentLanguage)}
-              </div>
-              <div className="text-sm font-mono tabular-nums font-extrabold text-amber-800">
-                {userTokenBalance.toLocaleString()}
-              </div>
-              {userAccessLabel && (
-                <div className="text-[10px] text-emerald-700 font-semibold truncate">
-                  {userAccessLabel}
+          {isPureAdminMode ? (
+            <div className="px-3 py-2.5 rounded-xl bg-slate-950 border border-amber-500/40 space-y-2 text-white">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[10px] font-mono uppercase font-bold text-emerald-400">
+                    MODO ADMINISTRADOR
+                  </div>
+                  <div className="text-xs font-extrabold text-amber-300 truncate">
+                    Acceso Total Ilimitado
+                  </div>
+                  <div className="text-[10px] text-slate-400 truncate">
+                    {adminUsersList.filter((u) => u.role !== 'admin').length} usuarios ·{' '}
+                    {
+                      adminUsersList.filter(
+                        (u) => u.role !== 'admin' && u.planTier !== 'free' && u.subscriptionStatus === 'active'
+                      ).length
+                    }{' '}
+                    suscriptores
+                  </div>
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveModule('admin-dashboard');
+                    setMobileSidebarOpen(false);
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  Panel
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPreviewingCustomerView(true);
+                  setMobileSidebarOpen(false);
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 text-[11px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                title="Activar manualmente Vista de Cliente para previsualizar las opciones de suscriptor"
+              >
+                <Eye className="w-3.5 h-3.5 text-amber-300" />
+                <span>Activar Vista de Cliente</span>
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                setIsBuyTokensModalOpen(true);
-                setMobileSidebarOpen(false);
-              }}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-amber-300 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              $5 DLL
-            </button>
-          </div>
+          ) : (
+            <div className="px-3 py-2.5 rounded-xl bg-white border border-amber-200/80 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-[11px] font-medium text-slate-500">
+                  {userAccessTier === 'limited_trial'
+                    ? `Acceso Limitado ($${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL)`
+                    : userAccessTier !== 'free'
+                      ? `Plan ${userAccessTier.toUpperCase()}`
+                      : t('tokensBadge', currentLanguage)}
+                </div>
+                <div className="text-sm font-mono tabular-nums font-extrabold text-amber-800">
+                  {userTokenBalance.toLocaleString()}
+                </div>
+                {userAccessLabel && (
+                  <div className="text-[10px] text-emerald-700 font-semibold truncate">
+                    {userAccessLabel}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBuyTokensModalOpen(true);
+                  setMobileSidebarOpen(false);
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-amber-300 text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                ${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL
+              </button>
+            </div>
+          )}
 
           {/* Utility Actions */}
           <div className="grid grid-cols-3 gap-1">
@@ -2997,26 +3685,36 @@ ${textoPdf || '{{texto_pdf}}'}
             <button
               type="button"
               onClick={() => {
-                setIsAdminModalOpen(true);
+                if (isVerifiedFirestoreAdmin) {
+                  setActiveModule('admin-dashboard');
+                } else {
+                  setIsAdminModalOpen(true);
+                }
                 setMobileSidebarOpen(false);
               }}
               className={`px-2 py-2 rounded-lg text-xs font-semibold flex flex-col items-center justify-center gap-1 border transition-colors cursor-pointer ${
-                adminSession
+                isVerifiedFirestoreAdmin
                   ? 'bg-emerald-50 text-emerald-900 border-emerald-200'
-                  : 'text-slate-700 hover:text-amber-900 hover:bg-white border-transparent hover:border-slate-200'
+                  : firebaseProfile
+                    ? 'bg-amber-50 text-amber-900 border-amber-200'
+                    : 'text-slate-700 hover:text-amber-900 hover:bg-white border-transparent hover:border-slate-200'
               }`}
               title={
-                adminSession
-                  ? `Administrador Activo: ${adminSession.user.email}`
-                  : 'Iniciar sesión como Administrador'
+                isVerifiedFirestoreAdmin
+                  ? 'Abrir Panel de Administrador'
+                  : firebaseProfile
+                    ? 'Mi Cuenta'
+                    : 'Iniciar Sesión (Admin / Cuenta)'
               }
             >
               <ShieldCheck
                 className={`w-3.5 h-3.5 ${
-                  adminSession ? 'text-emerald-600' : 'text-amber-700'
+                  isVerifiedFirestoreAdmin ? 'text-emerald-600' : 'text-amber-700'
                 }`}
               />
-              <span className="truncate max-w-full">Admin</span>
+              <span className="truncate max-w-full">
+                {isVerifiedFirestoreAdmin ? 'Admin' : firebaseProfile ? 'Cuenta' : 'Entrar'}
+              </span>
             </button>
           </div>
         </div>
@@ -3073,6 +3771,20 @@ ${textoPdf || '{{texto_pdf}}'}
               <FilePlus2 className={`w-3.5 h-3.5 ${activeModule === 'ai-pdf-creator' ? 'text-amber-400' : 'text-amber-700'}`} />
               <span className="hidden sm:inline">Crear PDF Completo con IA</span>
               <span className="sm:hidden">PDF IA</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsShortcutsModalOpen(true)}
+              className="px-2.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 bg-slate-50 hover:bg-amber-50 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="Ver lista de atajos de teclado globales (Ctrl+/ o ?)"
+              aria-label="Atajos de teclado globales"
+            >
+              <Keyboard className="w-3.5 h-3.5 text-amber-700" />
+              <span className="hidden md:inline">Atajos</span>
+              <kbd className="hidden xl:inline-flex items-center px-1.5 py-0.5 rounded bg-white border border-slate-200 font-mono text-[10px] font-semibold text-slate-500">
+                Ctrl+/
+              </kbd>
             </button>
 
             <LanguageSelector
@@ -3157,6 +3869,103 @@ ${textoPdf || '{{texto_pdf}}'}
 
         {/* Main Studio Workspace */}
         <main id="studio-main-workspace" className="flex-1 w-full max-w-[1280px] mx-auto px-4 sm:px-8 py-6 space-y-6">
+          {/* Active Vista de Cliente Indicator Banner (Shown ONLY when Verified Admin manually enables Vista de Cliente) */}
+          {isVerifiedFirestoreAdmin && isPreviewingCustomerView && (
+            <div className="rounded-xl bg-slate-950 text-white border border-amber-400/70 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs shadow-sm">
+              <div className="flex items-center gap-2 font-bold text-amber-300">
+                <Eye className="w-4 h-4 shrink-0" />
+                <span>
+                  Modo &ldquo;Vista de Cliente&rdquo; activo · Estás previsualizando las opciones de suscriptor como un comprador.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setActiveModule('admin-dashboard')}
+                  className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/15 font-bold text-xs cursor-pointer"
+                >
+                  Ir al Panel Admin
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPreviewingCustomerView(false);
+                    setIsBuyTokensModalOpen(false);
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>Salir de Vista de Cliente</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Visitor Conversion Promo Banner (Real-time synced with Firestore Configuración de Tarifas; hidden in Pure Admin Mode) */}
+          {!isPureAdminMode &&
+            monetizationSettings.promoBannerEnabled &&
+            (userAccessTier === 'free' || isPreviewingCustomerView) && (
+              <div className="rounded-xl bg-amber-50 border border-amber-300 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="space-y-1.5 min-w-0">
+                  <div className="font-bold text-amber-950">
+                    {resolvePromoBannerText(monetizationSettings)}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span
+                      className={`px-2 py-0.5 rounded-md border font-bold ${
+                        hasReachedMandatoryFreeLimit
+                          ? 'bg-rose-600 text-white border-rose-700'
+                          : 'bg-white border-amber-200 text-amber-900'
+                      }`}
+                    >
+                      {exactFreeProjectsLimit <= 0
+                        ? 'Suscripción obligatoria (0 gratis)'
+                        : hasReachedMandatoryFreeLimit
+                          ? `Límite alcanzado (${effectiveFreeProjectsUsed}/${exactFreeProjectsLimit}) · Suscripción requerida`
+                          : `Proyectos gratis: ${effectiveFreeProjectsUsed} / ${exactFreeProjectsLimit}`}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-mono font-bold text-slate-900">
+                      Prueba: ${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-mono font-bold text-slate-900">
+                      Pro: ${formatUsdPrice(monetizationSettings.proPriceUsd)}/mes
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-mono font-bold text-slate-900">
+                      VIP: ${formatUsdPrice(monetizationSettings.annualPriceUsd)}/año
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {!firebaseUser && (
+                    <button
+                      type="button"
+                      onClick={() => setIsAdminModalOpen(true)}
+                      className="px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-950 font-bold text-xs cursor-pointer"
+                    >
+                      Crear Cuenta Gratis
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMandatoryPaywallContext(
+                        hasReachedMandatoryFreeLimit
+                          ? {
+                              projectsUsed: effectiveFreeProjectsUsed,
+                              freeProjectsLimit: exactFreeProjectsLimit,
+                            }
+                          : null
+                      );
+                      setIsBuyTokensModalOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 text-amber-300 font-extrabold text-xs cursor-pointer"
+                  >
+                    Activar Prueba ${formatUsdPrice(monetizationSettings.trialPriceUsd)} DLL
+                  </button>
+                </div>
+              </div>
+            )}
+
           {/* Compact Single-Row Command Bar */}
           <UnifiedActionToolbar
             onCrear={handleToolbarCrear}
@@ -3169,12 +3978,41 @@ ${textoPdf || '{{texto_pdf}}'}
             onConvertir={handleToolbarConvertir}
             onMonetizar={() => setActiveModule('paypal-monetization')}
             onTestearPago={() => setIsBuyTokensModalOpen(true)}
+            onOpenAdminDashboard={() => setActiveModule('admin-dashboard')}
+            onToggleCustomerView={
+              isVerifiedFirestoreAdmin ? () => setIsPreviewingCustomerView(true) : undefined
+            }
+            isAdminMode={isPureAdminMode}
+            trialPriceUsd={monetizationSettings.trialPriceUsd}
             userTokenBalance={userTokenBalance}
             isGenerating={isGeneratingVideoBook || isExportingBookMp4}
             isPlayingBg={isPlayerModalOpen}
             canPlay={hasCreatedVideoBook}
             language={currentLanguage}
           />
+
+          {/* =====================================================================
+              MODULE: PANEL DE ADMINISTRADOR (EXCLUSIVO FIRESTORE role === 'admin')
+             ===================================================================== */}
+          {activeModule === 'admin-dashboard' && isVerifiedFirestoreAdmin && (
+            <AdminDashboardView
+              users={adminUsersList}
+              usageEvents={adminUsageEvents}
+              orders={adminOrdersList}
+              monetizationSettings={monetizationSettings}
+              isLoadingData={isLoadingAdminData}
+              isPreviewingCustomerView={isPreviewingCustomerView}
+              onTogglePreviewCustomerView={() =>
+                setIsPreviewingCustomerView((prev) => !prev)
+              }
+              onSignOut={handleFirebaseSignOut}
+              onNotify={(msg, type) => {
+                if (type === 'error') toast.error('Panel Admin', msg);
+                else if (type === 'info') toast.info('Panel Admin', msg);
+                else toast.success('Panel Admin', msg);
+              }}
+            />
+          )}
 
           {/* =====================================================================
               MODULE: 1,200 FOTOS DE ESCENAS POR NICHOS (FULL GALLERY VIEW)
@@ -3233,20 +4071,54 @@ ${textoPdf || '{{texto_pdf}}'}
 
           {/* =====================================================================
               MODULE: SUSCRIPCIÓN Y ACCESO COMPLETO (PAYPAL)
+              Hidden for Pure Admins unless Vista de Cliente is manually activated
              ===================================================================== */}
-          {activeModule === 'paypal-monetization' && (
-            <PayPalMonetizationHub
-              currentVideoBook={videoBook}
-              currentCoverUrl={pageImages[0]}
-              currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
-              savedAudiobooks={savedAudiobooks}
-              onExportCurrentMp3={handleExportVideoBookMp3}
-              onExportCurrentMp4={() => handleExportVideoBookMp4()}
-              externalCheckoutProduct={externalPayPalProduct}
-              onClearExternalCheckout={() => setExternalPayPalProduct(null)}
-              onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
-            />
-          )}
+          {activeModule === 'paypal-monetization' &&
+            (isPureAdminMode ? (
+              <div className="rounded-3xl bg-slate-950 text-white p-8 border border-amber-500/40 shadow-xl space-y-4">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>MODO ADMINISTRADOR PURO</span>
+                </div>
+                <h2 className="font-display text-2xl font-extrabold text-amber-300">
+                  Opciones de Suscriptor Ocultas para Administrador
+                </h2>
+                <p className="text-sm text-slate-300 max-w-2xl">
+                  Tienes acceso total ilimitado verificado en Firestore. Si deseas previsualizar esta pantalla de suscripción y checkout de PayPal exactamente como la ve un comprador, activa manualmente el modo <strong>Vista de Cliente</strong>.
+                </p>
+                <div className="flex flex-wrap items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('admin-dashboard')}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Ir al Panel Admin y Suscriptores</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPreviewingCustomerView(true)}
+                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/20 font-bold text-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    <Eye className="w-4 h-4 text-amber-300" />
+                    <span>Activar Vista de Cliente</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <PayPalMonetizationHub
+                currentVideoBook={videoBook}
+                currentCoverUrl={pageImages[0]}
+                currentAvatarName={`${selectedAvatar.name} (Voz ${selectedAvatar.voiceName})`}
+                savedAudiobooks={savedAudiobooks}
+                onExportCurrentMp3={handleExportVideoBookMp3}
+                onExportCurrentMp4={() => handleExportVideoBookMp4()}
+                externalCheckoutProduct={externalPayPalProduct}
+                onClearExternalCheckout={() => setExternalPayPalProduct(null)}
+                onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+                monetizationSettings={monetizationSettings}
+              />
+            ))}
 
           {/* =====================================================================
               MODULE: CREAR PDF CON IA (ALL TOOLS ATTACHED)
@@ -3259,6 +4131,15 @@ ${textoPdf || '{{texto_pdf}}'}
                 setCustomAvatarUrl(undefined);
                 setVoiceName(av.voiceName);
                 setVoiceGender(av.gender);
+              }}
+              onBeforeGenerateProject={() => enforceFreeProjectQuota('Crear PDF Completo con IA')}
+              onProjectGenerated={(pdfTitle) => {
+                recordGeneratedProjectUsage(
+                  'ai-pdf-creator',
+                  'pdf_created',
+                  `Generó PDF completo con IA: ${pdfTitle || 'Documento IA'}`,
+                  { pdfsDelta: 1 }
+                );
               }}
               onConvertToAudiobook={async (createdBook, imagesMap, prebuiltAudio) => {
                 setVideoBook(createdBook);
@@ -7154,13 +8035,20 @@ ${textoPdf || '{{texto_pdf}}'}
         </div>
       )}
 
-      {/* Administrator Account & Control Center Modal */}
+      {/* Administrator & Account Sign-In Modal (Firebase Google Auth) */}
       <AdminControlModal
         isOpen={isAdminModalOpen}
         onClose={() => setIsAdminModalOpen(false)}
-        session={adminSession}
-        onLoginSuccess={handleAdminLoginSuccess}
-        onLogout={handleAdminLogout}
+        firebaseProfile={firebaseProfile}
+        isAdmin={isVerifiedFirestoreAdmin}
+        isAuthLoading={isAuthLoading}
+        isPreviewingCustomerView={isPreviewingCustomerView}
+        onTogglePreviewCustomerView={
+          isVerifiedFirestoreAdmin
+            ? () => setIsPreviewingCustomerView((prev) => !prev)
+            : undefined
+        }
+        onOpenAdminDashboard={() => setActiveModule('admin-dashboard')}
         savedAudiobooksCount={savedAudiobooks.length}
         scriptHistoryCount={scriptHistory.length}
       />
@@ -7194,15 +8082,40 @@ ${textoPdf || '{{texto_pdf}}'}
         isGoldModelActive={isGoldModel}
         onOpenAdmin={() => setIsAdminModalOpen(true)}
         onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+        isPureAdminMode={isPureAdminMode}
       />
 
-      {/* Real PayPal $5 DLL Limited Access & Token Checkout Modal */}
+      {/* Real PayPal $5 DLL Limited Access & Token Checkout Modal (Hidden in Pure Admin Mode) */}
       <BuyTokensModal
-        isOpen={isBuyTokensModalOpen}
-        onClose={() => setIsBuyTokensModalOpen(false)}
+        isOpen={isBuyTokensModalOpen && !isPureAdminMode}
+        onClose={() => {
+          setIsBuyTokensModalOpen(false);
+          setMandatoryPaywallContext(null);
+        }}
         currentBalance={userTokenBalance}
         currentAccessTier={userAccessTier}
-        onTokensPurchased={handleTokensPurchased}
+        onTokensPurchased={(tokensToAdd, amountPaid, packageName, accessDetails) => {
+          setMandatoryPaywallContext(null);
+          handleTokensPurchased(tokensToAdd, amountPaid, packageName, accessDetails);
+        }}
+        onOrderCreated={(order) => {
+          if (firebaseUser && firebaseProfile) {
+            void createFirestorePendingOrder(
+              firebaseUser,
+              firebaseProfile.displayName,
+              order
+            ).catch(() => {});
+            void recordUserStudioActivity(
+              firebaseUser,
+              firebaseProfile,
+              'checkout_opened',
+              'paypal-monetization',
+              `Generó orden PayPal ${order.orderId} (${order.packageTitle})`
+            ).catch(() => {});
+          }
+        }}
+        monetizationSettings={monetizationSettings}
+        mandatoryPaywallContext={mandatoryPaywallContext}
         language={currentLanguage}
       />
 
@@ -7213,6 +8126,7 @@ ${textoPdf || '{{texto_pdf}}'}
         hasLoadedText={textoPdf.trim().length > 20}
         accessTier={userAccessTier}
         userTokenBalance={userTokenBalance}
+        isPureAdminMode={isPureAdminMode}
         onExecuteAction={handleGuideBotAction}
       />
 
@@ -7223,7 +8137,19 @@ ${textoPdf || '{{texto_pdf}}'}
         title={videoBook.bookTitle || 'KINETIX ESTUDIO IA'}
         subtitle={videoBook.authorOrSource || videoBook.subtitle || 'Audiolibros, Guiones & Locución Neuronal'}
         onOpenBuyTokens={() => setIsBuyTokensModalOpen(true)}
+        isPureAdminMode={isPureAdminMode}
         language={currentLanguage}
+      />
+
+      {/* Global Keyboard Shortcuts Cheatsheet Modal */}
+      <KeyboardShortcutsModal
+        isOpen={isShortcutsModalOpen}
+        onClose={() => setIsShortcutsModalOpen(false)}
+        activeModule={activeModule}
+        isAdmin={isVerifiedFirestoreAdmin}
+        onTriggerSave={handleGlobalShortcutSave}
+        onTriggerGenerate={handleGlobalShortcutGenerate}
+        onNavigateModule={(mod) => setActiveModule(mod)}
       />
 
         {/* Quiet Studio Footer */}
@@ -7232,7 +8158,16 @@ ${textoPdf || '{{texto_pdf}}'}
             <div>
               KINETIX ESTUDIO IA · Audiolibros desde PDF, Storyboard, Locución Neuronal y Exportación MP4 / MP3
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsShortcutsModalOpen(true)}
+                className="inline-flex items-center gap-1.5 font-semibold text-slate-600 hover:text-amber-800 cursor-pointer"
+                title="Abrir lista de atajos de teclado (Ctrl+/)"
+              >
+                <Keyboard className="w-3.5 h-3.5" />
+                <span>Atajos (Ctrl+/)</span>
+              </button>
               <button
                 type="button"
                 onClick={() => setActiveModule('pdf-director')}

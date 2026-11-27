@@ -46,6 +46,7 @@ interface SupportConciergeModalProps {
   isGoldModelActive?: boolean;
   onOpenAdmin?: () => void;
   onOpenBuyTokens?: () => void;
+  isPureAdminMode?: boolean;
 }
 
 const INITIAL_GREETING: SupportChatMessage = {
@@ -56,7 +57,7 @@ const INITIAL_GREETING: SupportChatMessage = {
     '**Paso a Paso**:\n' +
     '1. Selecciona una de las consultas rápidas de abajo o escribe/dicta tu duda con el micrófono.\n' +
     '2. Te indicaré la ruta exacta en la interfaz (**Audiolibros & PDF**, **1,200 Fotos**, **Guiones**, **Voces IA**, etc.).\n' +
-    '3. Si necesitas soporte humano o asistencia prioritaria, cuento con canal directo de escalación (**garciasaul501@gmail.com**).\n\n' +
+    '3. Si necesitas soporte adicional o reportar algún inconveniente, utiliza este chat oficial de soporte en tiempo real.\n\n' +
     '**Tip / Siguiente Paso**:\n' +
     '• ¿Qué tarea o proyecto audiovisual deseas completar hoy en Kinetix Estudio IA?',
   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -85,7 +86,7 @@ const QUICK_PROMPTS = [
   },
   {
     label: '🛡️ Acceso Administrador',
-    prompt: '¿Cómo inicio sesión con la cuenta de administrador garciasaul501@gmail.com?',
+    prompt: '¿Cómo acceso al panel de administrador del estudio?',
   },
   {
     label: '🆘 Canal de Soporte Oficial',
@@ -101,6 +102,7 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
   isGoldModelActive = true,
   onOpenAdmin,
   onOpenBuyTokens,
+  isPureAdminMode = false,
 }) => {
   const [messages, setMessages] = useState<SupportChatMessage[]>([INITIAL_GREETING]);
   const [inputText, setInputText] = useState('');
@@ -160,7 +162,7 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
         quickAction = { label: 'Ir a Galería 1,200 Fotos →', actionType: 'niche-gallery' };
       } else if (lowerReply.includes('guiones') || lowerReply.includes('guion')) {
         quickAction = { label: 'Ir a Generador de Guiones →', actionType: 'script' };
-      } else if (lowerReply.includes('admin') || lowerReply.includes('garciasaul501')) {
+      } else if (lowerReply.includes('admin') || lowerReply.includes('administrador')) {
         quickAction = { label: 'Abrir Acceso Admin →', actionType: 'admin' };
       } else if (lowerReply.includes('letras oro')) {
         quickAction = { label: 'Alternar Modelo Letras Oro →', actionType: 'gold' };
@@ -184,7 +186,7 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
           '**Paso a Paso**:\n' +
           '1. Ve a la barra superior y selecciona el módulo deseado (**Audiolibros & PDF**, **1,200 Fotos** o **Guiones**).\n' +
           '2. Usa **Comprar Tokens** para recargar paquetes de 62,500 a 625,000 tokens con PayPal protegido.\n' +
-          '3. Para soporte humano o cualquier consulta adicional, escribe directamente a: **garciasaul501@gmail.com**.\n\n' +
+          '3. Para asistencia adicional o consultas sobre tu cuenta, escríbenos directamente por este asistente de soporte.\n\n' +
           '**Tip / Siguiente Paso**:\n' +
           '• ¿En qué sección te gustaría trabajar hoy?',
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -204,6 +206,11 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
 
   const handleTriggerQuickAction = (actionType: SupportQuickActionType) => {
     if (actionType === 'monetization') {
+      if (isPureAdminMode) {
+        onOpenAdmin?.();
+        onClose();
+        return;
+      }
       if (onOpenBuyTokens) {
         onOpenBuyTokens();
         onClose();
@@ -266,7 +273,10 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
             <Sparkles className="w-3 h-3 text-amber-400" />
             Preguntas Rápidas:
           </span>
-          {QUICK_PROMPTS.map((qp, idx) => (
+          {(isPureAdminMode
+            ? QUICK_PROMPTS.filter((qp) => !qp.label.includes('Acceso Inmediato'))
+            : QUICK_PROMPTS
+          ).map((qp, idx) => (
             <button
               key={idx}
               type="button"
@@ -342,8 +352,9 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
                     })}
                   </div>
 
-                  {/* Inline Action Launcher if available */}
-                  {msg.quickAction && (
+                  {/* Inline Action Launcher if available (subscriber upsells hidden in Pure Admin Mode) */}
+                  {msg.quickAction &&
+                    (!isPureAdminMode || msg.quickAction.actionType !== 'monetization') && (
                     <div className="pt-2">
                       <button
                         type="button"
@@ -444,7 +455,7 @@ export const SupportConciergeModal: React.FC<SupportConciergeModalProps> = ({
           {/* Official escalation channel disclaimer */}
           <div className="flex flex-wrap items-center justify-between text-[11px] text-amber-200/70 px-1">
             <span>
-              Canal de Escalación Oficial: <strong className="text-amber-300">garciasaul501@gmail.com</strong>
+              Soporte Oficial: <strong className="text-amber-300">Kinetix Estudio IA</strong>
             </span>
             <span className="hidden sm:inline">
               Resuelve dudas operativas, navegación y onboarding en tiempo real

@@ -1,0 +1,359 @@
+{
+  "entities": {
+    "AdminRegistry": {
+      "title": "AdminRegistry",
+      "description": "Trusted registry of administrator accounts authorized to manage subscribers, analytics, and studio monetization.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the administrator."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display label for the administrator."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin"],
+          "description": "Fixed administrator role."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when admin access was granted."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the last update."
+        }
+      },
+      "required": ["uid", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "UserAccount": {
+      "title": "UserAccount",
+      "description": "Registered studio user profile with subscription tier, usage counters, and activity timestamps.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID matching the document ID."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "User display name."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 160,
+          "description": "User account email (restricted to owner and admin)."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["subscriber", "admin"],
+          "description": "Access role assigned to this user."
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["free", "limited_trial", "starter", "pro", "vip"],
+          "description": "Active monetization tier."
+        },
+        "subscriptionStatus": {
+          "type": "string",
+          "enum": ["inactive", "active", "expired", "suspended"],
+          "description": "Current subscription status."
+        },
+        "tokenBalance": {
+          "type": "number",
+          "description": "Available studio generation tokens."
+        },
+        "projectsCreated": {
+          "type": "number",
+          "description": "Total audiovisual or PDF projects created."
+        },
+        "audiobooksCreated": {
+          "type": "number",
+          "description": "Total audiobooks generated."
+        },
+        "pdfsCreated": {
+          "type": "number",
+          "description": "Total AI PDFs generated."
+        },
+        "sessionsCount": {
+          "type": "number",
+          "description": "Number of studio sessions logged."
+        },
+        "lastModuleUsed": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Most recent studio module opened by the user."
+        },
+        "lastOrderId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 128,
+          "description": "Most recent subscription order ID linked to this account."
+        },
+        "lastActiveAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the user's most recent activity."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was first registered."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the account was last updated."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "email",
+        "role",
+        "planTier",
+        "subscriptionStatus",
+        "tokenBalance",
+        "projectsCreated",
+        "audiobooksCreated",
+        "pdfsCreated",
+        "sessionsCount",
+        "lastModuleUsed",
+        "lastOrderId",
+        "lastActiveAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UsageEvent": {
+      "title": "UsageEvent",
+      "description": "Real-time activity event showing who uses the app and which tools they run.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the user performing the action."
+        },
+        "userLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Display label for the activity feed."
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "session_start",
+            "audiobook_created",
+            "pdf_created",
+            "voice_generated",
+            "video_exported",
+            "checkout_opened",
+            "subscription_activated"
+          ],
+          "description": "Type of activity performed."
+        },
+        "moduleId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Studio module where the action occurred."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "description": "Short human-readable summary of the action."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the activity event."
+        }
+      },
+      "required": ["userId", "userLabel", "eventType", "moduleId", "summary", "createdAt"]
+    },
+    "SubscriptionOrder": {
+      "title": "SubscriptionOrder",
+      "description": "PayPal payment and subscription order tracked for revenue and subscriber management.",
+      "type": "object",
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Unique order identifier matching document ID."
+        },
+        "userId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "UID of the purchasing user."
+        },
+        "userLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Buyer display name."
+        },
+        "packageId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Purchased package identifier."
+        },
+        "packageTitle": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 140,
+          "description": "Human-readable package title."
+        },
+        "planTier": {
+          "type": "string",
+          "enum": ["limited_trial", "starter", "pro", "vip"],
+          "description": "Resulting plan tier."
+        },
+        "amountUsd": {
+          "type": "number",
+          "description": "Order amount in USD."
+        },
+        "tokensGranted": {
+          "type": "number",
+          "description": "Number of tokens included in the package."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "paid", "cancelled"],
+          "description": "Lifecycle status of the order."
+        },
+        "paypalTxId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "Optional PayPal transaction receipt ID."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the order was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the order was updated."
+        }
+      },
+      "required": [
+        "orderId",
+        "userId",
+        "userLabel",
+        "packageId",
+        "packageTitle",
+        "planTier",
+        "amountUsd",
+        "tokensGranted",
+        "status",
+        "paypalTxId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "MonetizationSettings": {
+      "title": "MonetizationSettings",
+      "description": "Admin-controlled pricing, free-tier limits, and promotional settings for studio profitability.",
+      "type": "object",
+      "properties": {
+        "trialPriceUsd": {
+          "type": "number",
+          "description": "Price in USD for the limited trial plan."
+        },
+        "proPriceUsd": {
+          "type": "number",
+          "description": "Monthly price in USD for the Pro Studio plan."
+        },
+        "annualPriceUsd": {
+          "type": "number",
+          "description": "Annual price in USD for the VIP plan."
+        },
+        "freeProjectsLimit": {
+          "type": "number",
+          "description": "Maximum projects allowed on the Free tier before upgrade prompt."
+        },
+        "requireLoginForExport": {
+          "type": "boolean",
+          "description": "Whether visitors must sign in before exporting MP3/MP4/PDF."
+        },
+        "promoBannerEnabled": {
+          "type": "boolean",
+          "description": "Toggle for showing the conversion offer banner to non-admin visitors."
+        },
+        "promoBannerText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 180,
+          "description": "Promotional banner message displayed to visitors."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest settings update."
+        }
+      },
+      "required": [
+        "trialPriceUsd",
+        "proPriceUsd",
+        "annualPriceUsd",
+        "freeProjectsLimit",
+        "requireLoginForExport",
+        "promoBannerEnabled",
+        "promoBannerText",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": { "$ref": "#/entities/AdminRegistry" },
+      "description": "Trusted administrator lookup documents."
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserAccount" },
+      "description": "User accounts, subscription plans, and live activity metrics."
+    },
+    "/usageEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/UsageEvent" },
+      "description": "Real-time log of user actions across studio tools."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/SubscriptionOrder" },
+      "description": "PayPal subscription and trial orders for revenue tracking."
+    },
+    "/appSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/MonetizationSettings" },
+      "description": "Global monetization and profitability controls managed by Admin."
+    }
+  }
+}

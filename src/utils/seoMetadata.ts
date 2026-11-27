@@ -6,7 +6,8 @@ export type StudioModuleId =
   | 'pdf-director'
   | 'narration'
   | 'sequence'
-  | 'paypal-monetization';
+  | 'paypal-monetization'
+  | 'admin-dashboard';
 
 export interface StudioModuleSeoEntry {
   id: StudioModuleId;
@@ -195,6 +196,26 @@ export const STUDIO_MODULES_SEO: Record<StudioModuleId, StudioModuleSeoEntry> = 
       'Botones directos de suscripción con PayPal',
       'Descarga inmediata de audiolibros en MP3 y MP4',
       'Licencia comercial completa sin límite de duración',
+    ],
+  },
+  'admin-dashboard': {
+    id: 'admin-dashboard',
+    shortLabel: 'Panel Administrador',
+    sectionBadge: 'PANEL PRIVADO DE ADMINISTRADOR · SUSCRIPTORES Y RENTABILIDAD',
+    heading: 'Panel de Administrador: Suscriptores, Actividad en Vivo y Rentabilidad',
+    shortDescription:
+      'Supervisa en tiempo real quién usa tu estudio, tus suscriptores de pago, usuarios inactivos, ingresos en USD y controles de conversión.',
+    seoTitle: 'Panel de Administrador | Kinetix Studio',
+    seoDescription:
+      'Gestión administrativa de suscriptores, analítica de uso en vivo y configuración de rentabilidad.',
+    keywords: 'panel administrador, suscriptores, analítica en vivo, rentabilidad Kinetix Studio',
+    ogImage:
+      'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1200&h=630&q=85',
+    ogImageAlt: 'Panel de Administrador de Kinetix Studio',
+    highlights: [
+      'Suscriptores en tiempo real y control de planes',
+      'Monitor de quién usa la app y quién está inactivo',
+      'Controles de precios y rentabilidad en vivo',
     ],
   },
 };

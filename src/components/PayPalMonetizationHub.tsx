@@ -42,6 +42,7 @@ interface PayPalMonetizationHubProps {
   externalCheckoutProduct?: PayPalProductItem | null;
   onClearExternalCheckout?: () => void;
   onOpenBuyTokens?: () => void;
+  monetizationSettings?: import('../services/firebaseStudioService').MonetizationSettings;
 }
 
 interface SubscriptionPlan {
@@ -105,7 +106,7 @@ const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
 interface ServerCreatedPlanOrder {
   orderId: string;
   checkoutUrl: string;
-  receiverAccount: string;
+  merchantName?: string;
   amount: number;
 }
 
@@ -130,7 +131,7 @@ async function createPayPalPlanOrder(
     return {
       orderId: data.orderId,
       checkoutUrl: data.checkoutUrl,
-      receiverAccount: data.receiverAccount || 'garciasaul@hotmail.com',
+      merchantName: data.merchantName || 'Kinetix Studio Oficial',
       amount: data.amount || amount,
     };
   } catch {
@@ -151,7 +152,44 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
   externalCheckoutProduct,
   onClearExternalCheckout,
   onOpenBuyTokens,
+  monetizationSettings,
 }) => {
+  const trialPrice = Math.max(1, Number(monetizationSettings?.trialPriceUsd) || 5);
+  const proPrice = Math.max(1, Number(monetizationSettings?.proPriceUsd) || 19.99);
+  const annualPrice = Math.max(1, Number(monetizationSettings?.annualPriceUsd) || 149);
+  const freeProjectsLimit =
+    typeof monetizationSettings?.freeProjectsLimit === 'number'
+      ? Math.max(0, Math.round(monetizationSettings.freeProjectsLimit))
+      : 1;
+  const fmtPrice = (val: number) => (Number.isInteger(val) ? String(val) : val.toFixed(2));
+
+  const liveSubscriptionPlans: SubscriptionPlan[] = React.useMemo(
+    () =>
+      SUBSCRIPTION_PLANS.map((plan) => {
+        if (plan.id === 'trial-5') {
+          return {
+            ...plan,
+            name: `Prueba por solo $${fmtPrice(trialPrice)} DLL`,
+            price: trialPrice,
+          };
+        }
+        if (plan.id === 'plan-pro') {
+          return {
+            ...plan,
+            price: proPrice,
+          };
+        }
+        if (plan.id === 'plan-annual') {
+          return {
+            ...plan,
+            price: annualPrice,
+          };
+        }
+        return plan;
+      }),
+    [trialPrice, proPrice, annualPrice]
+  );
+
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [isSubscribed, setIsSubscribed] = useState<boolean>(() => {
     try {
@@ -165,11 +203,9 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
   const [paypalTxCode, setPaypalTxCode] = useState<string>('');
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [liveStatus, setLiveStatus] = useState<{
-    receiverAccount: string;
     paidOrdersCount: number;
     totalRevenueUsd: number;
   }>({
-    receiverAccount: 'garciasaul@hotmail.com',
     paidOrdersCount: 0,
     totalRevenueUsd: 0,
   });
@@ -178,9 +214,8 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
     fetch('/api/paypal/status')
       .then((r) => r.json())
       .then((d) => {
-        if (d && d.receiverAccount) {
+        if (d && d.success) {
           setLiveStatus({
-            receiverAccount: d.receiverAccount,
             paidOrdersCount: Number(d.paidOrdersCount || 0),
             totalRevenueUsd: Number(d.totalRevenueUsd || 0),
           });
@@ -262,7 +297,7 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
           <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold tracking-wide">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             <span>
-              Pagos reales PayPal activos → <strong>{liveStatus.receiverAccount}</strong>
+              Pagos reales PayPal activos · <strong>Kinetix Estudio IA</strong>
             </span>
             <span className="text-slate-400">·</span>
             <span className="font-mono text-emerald-700">
@@ -275,7 +310,15 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
           </h1>
 
           <p className="text-sm sm:text-base text-slate-600 max-w-2xl mx-auto leading-relaxed">
-            Empieza con la <strong>Prueba por solo $5 DLL</strong> (Acceso Limitado por 7 días + 62,500 Tokens) o activa el estudio completo. Todos los pagos se procesan directo a PayPal en USD.
+            {freeProjectsLimit > 0 ? (
+              <>
+                Empieza con <strong>{freeProjectsLimit} {freeProjectsLimit === 1 ? 'proyecto gratis' : 'proyectos gratis'}</strong>, activa la <strong>Prueba por solo ${fmtPrice(trialPrice)} DLL</strong> (Acceso Limitado por 7 días + 62,500 Tokens) o el <strong>Plan Pro (${fmtPrice(proPrice)}/mes)</strong>. Todos los pagos se procesan directo a PayPal en USD.
+              </>
+            ) : (
+              <>
+                Empieza con la <strong>Prueba por solo ${fmtPrice(trialPrice)} DLL</strong> (Acceso Limitado por 7 días + 62,500 Tokens) o activa el <strong>Plan Pro (${fmtPrice(proPrice)}/mes)</strong>. Todos los pagos se procesan directo a PayPal en USD.
+              </>
+            )}
           </p>
 
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
@@ -286,16 +329,16 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
                 className="px-7 py-3.5 rounded-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-sm flex items-center gap-2 shadow-lg shadow-amber-500/25 transition-all cursor-pointer border border-amber-600/30"
               >
                 <Zap className="w-4 h-4 text-slate-950 fill-current" />
-                <span>Prueba por solo $5 DLL (Acceso Limitado)</span>
+                <span>Prueba por solo ${fmtPrice(trialPrice)} DLL (Acceso Limitado)</span>
               </button>
             )}
 
             <button
               type="button"
-              onClick={() => handleOpenSubscribeModal(SUBSCRIPTION_PLANS[1])}
+              onClick={() => handleOpenSubscribeModal(liveSubscriptionPlans[1])}
               className="px-6 py-3.5 rounded-full bg-slate-950 hover:bg-slate-800 text-white font-extrabold text-sm flex items-center gap-2 transition-all cursor-pointer"
             >
-              <span>EMPIEZA AHORA · PLAN PRO ($19.99)</span>
+              <span>EMPIEZA AHORA · PLAN PRO (${fmtPrice(proPrice)})</span>
             </button>
 
             {isSubscribed && (
@@ -309,7 +352,7 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
 
         {/* Modern Pricing Cards Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-10">
-          {SUBSCRIPTION_PLANS.map((plan) => (
+          {liveSubscriptionPlans.map((plan) => (
             <div
               key={plan.id}
               className={`rounded-2xl p-6 sm:p-7 flex flex-col justify-between transition-all ${
@@ -462,7 +505,7 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
 
                         <div className="pt-2 border-t border-slate-200 space-y-2">
                           <div className="text-[11px] font-bold text-slate-700">
-                            Orden {activeOrder.orderId} → {activeOrder.receiverAccount}
+                            Orden {activeOrder.orderId} · PayPal Oficial
                           </div>
                           <input
                             type="text"
@@ -490,7 +533,7 @@ export const PayPalMonetizationHub: React.FC<PayPalMonetizationHubProps> = ({
 
                   <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Pago verificado directo a {liveStatus.receiverAccount}</span>
+                    <span>Pago verificado y protegido por PayPal Oficial</span>
                   </div>
                 </>
               )}

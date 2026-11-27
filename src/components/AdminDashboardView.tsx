@@ -684,12 +684,14 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       )}
 
       {/* ===================================================================
-          TAB 2: ANALÍTICAS DE CONVERSIÓN (RECHARTS · ÚLTIMOS 30 DÍAS)
+          TAB 2: ANALÍTICAS DE CONVERSIÓN AVANZADA (RECHARTS + TABLA INTERACTIVA)
          =================================================================== */}
       {activeTab === 'analytics' && (
         <ConversionAnalyticsSection
           customerUsers={customerUsers}
+          usageEvents={usageEvents}
           orders={orders}
+          freeProjectsLimit={monetizationSettings.freeProjectsLimit}
           isLoadingData={isLoadingData}
         />
       )}
